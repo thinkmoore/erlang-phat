@@ -11,6 +11,7 @@ init({State, Master}) ->
 replicaAwaitingPrepare({prepare, ViewNumber, Op, NewOpNumber, CommitNumber}, 
     State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
     io:fwrite("got prepare!~n"),
+    sendToMaster(Master, {prepareOk, Op}),
     {stop, normal, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MASTER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -23,6 +24,10 @@ broadcastToReplicas(Master,Message) ->
             gen_fsm:send_event(Replica,Message)
         end,
         [Node || Node <- all_nodes(), Node =/= Master]).
+
+sendToMaster(Master,Message) ->
+    io:fwrite("sending to master ~p~n", [Master]),
+    gen_fsm:send_event(Master,Message).
 
 masterAwaitingRequest({request, Op, Client, RequestNum}, State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
     io:fwrite("in master awaiting request~n"),
@@ -53,12 +58,16 @@ terminate(_,_,_) ->
     io:fwrite("terminating!~n").
 
 all_nodes() ->
-    [vr, vr2].
+    [vrMaster, replica1].
+
+clientRequestFun() ->
+    io:fwrite("client request performed!~n").
 
 start() -> 
-    gen_fsm:start_link({local, vr}, vr, {masterAwaitingRequest, vr}, []),
-    gen_fsm:start_link({local, vr2}, vr, {replicaAwaitingPrepare, vr}, []),
-    gen_fsm:send_event(vr, {request, hello, 1, 1}).
+    Master = vrMaster,
+    gen_fsm:start_link({local, Master}, vr, {masterAwaitingRequest, Master}, []),
+    gen_fsm:start_link({local, replica1}, vr, {replicaAwaitingPrepare, Master}, []),
+    gen_fsm:send_event(Master, {request, fun vr:clientRequestFun/0, 1, 1}).
 
 
 
