@@ -8,9 +8,27 @@ init({State, Master}) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% REPLICA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-replicaAwaitingPrepare({prepare, ViewNumber, Op, NewOpNumber, CommitNumber}, 
+replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCommitNumber}, 
     State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
-    io:fwrite("got prepare!~n"),
+    io:fwrite("got prepare~n"),
+    if 
+        (MasterOpNumber == OpNumber + 1) and (CommitNumber == MasterCommitNumber) ->
+            io:fwrite("good prepare ~n"),
+            NewOpNumber = MasterOpNumber,
+            NewCommitNumber = CommitNumber;
+        (MasterOpNumber > OpNumber  + 1) ->
+            io:fwrite("initiate state transfer~n"),
+            NewOpNumber = OpNumber,
+            NewCommitNumber = CommitNumber;
+        (OpNumber == MasterCommitNumber) and (MasterOpNumber == OpNumber + 1) ->
+            io:fwrite("Ops ~s to ~s got committed", [CommitNumber, MasterCommitNumber]),
+            % commit them
+            NewOpNumber = MasterOpNumber,
+            NewCommitNumber = MasterCommitNumber;
+        true ->
+            io:fwrite("invariant failure: ~s~n", {OpNumber, CommitNumber, MasterOpNumber, MasterCommitNumber}),
+            erlang:error(badreplicainvariant)
+    end,
     sendToMaster(Master, {prepareOk, Op}),
     {stop, normal, State}.
 
