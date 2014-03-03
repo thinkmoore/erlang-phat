@@ -1,15 +1,15 @@
 -module(vr).
--export([start/0, init/1, masterAwaitingRequest/2, replicaAwaitingPrepare/2, terminate/3, stop/0, handle_event/3]).
+-export([startMasterNode/2, startReplicaNode/3, test/0, init/1, masterAwaitingRequest/2, replicaAwaitingPrepare/2, terminate/3, stop/0, handle_event/3]).
 -behavior(gen_fsm).
 
-init({State, Master}) ->
-    {ok, State, {[], Master, dict:new(), 0, 0, 0}}.
+init({State, Master, ReplicaCommitFn}) ->
+    {ok, State, {[], Master, dict:new(), 0, 0, 0, ReplicaCommitFn}}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% REPLICA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCommitNumber}, 
-    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
+    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber, ReplicaCommitFn}) ->
     io:fwrite("got prepare~n"),
     if 
         (MasterCommitNumber == CommitNumber) and (MasterOpNumber == OpNumber + 1)  ->
@@ -27,15 +27,21 @@ replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCom
             NewCommitNumber = MasterCommitNumber;
         true ->
             io:fwrite("invariant failure: ~s~n", {OpNumber, CommitNumber, MasterOpNumber, MasterCommitNumber}),
-            erlang:error(badreplicainvariant)
+            erlang:error(badReplicaPrepareInvariant)
     end,
     sendToMaster(Master, {prepareOk, Op}),
     {stop, normal, State}.
 
+
+%replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCommitNumber}, 
+%    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
+    
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MASTER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-broadcastToReplicas(Master,Message) ->
+broadcastToReplicas(Master, Message) ->
     lists:map(
         fun(Replica) ->
             io:fwrite("sending to replica ~p~n", [Replica]),
@@ -47,7 +53,8 @@ sendToMaster(Master,Message) ->
     io:fwrite("sending to master ~p~n", [Master]),
     gen_fsm:send_event(Master,Message).
 
-masterAwaitingRequest({request, Op, Client, RequestNum}, State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
+masterAwaitingRequest({request, Op, Client, RequestNum}, 
+    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber, ReplicaCommitFn}) ->
     io:fwrite("in master awaiting request~n"),
     case dict:find(Client, ClientsTable) of
         {ok, N} when RequestNum < N -> 
@@ -63,7 +70,7 @@ masterAwaitingRequest({request, Op, Client, RequestNum}, State = {Log, Master, C
             NewLog = [Op|Log],
             NewOpNumber = OpNumber + 1,
             broadcastToReplicas(Master, {prepare, ViewNumber, Op, NewOpNumber, CommitNumber}),
-            {next_state, masterAwaitingPrepareOks, {NewLog, Master, NewClientsTable, NewOpNumber, CommitNumber, ViewNumber}}
+            {next_state, masterAwaitingPrepareOks, {NewLog, Master, NewClientsTable, NewOpNumber, CommitNumber, ViewNumber, ReplicaCommitFn}}
     end.
 
 stop() ->
@@ -78,14 +85,23 @@ terminate(_,_,_) ->
 all_nodes() ->
     [vrMaster, replica1].
 
-clientRequestFun() ->
-    io:fwrite("client request performed!~n").
+startMasterNode(FsmRef, CommitAsReplicaFun) ->
+    gen_fsm:start_link({local, FsmRef}, vr, {masterAwaitingRequest, FsmRef, CommitAsReplicaFun}, []).
 
-start() -> 
+startReplicaNode(FsmRef, Master, CommitAsReplicaFun) ->
+    gen_fsm:start_link({local, FsmRef}, vr, {replicaAwaitingPrepare, Master, CommitAsReplicaFun}, []).
+
+handleClientRequest(FsmRef, Message = {Op, Client, RequestNum}) ->
+    gen_fsm:send_event(FsmRef, {request, Op, Client, RequestNum}).
+
+commitAsReplicaTest(Msg) ->
+    io:fwrite("committing as replica ~p~n", [Msg]).
+
+test() -> 
     Master = vrMaster,
-    gen_fsm:start_link({local, Master}, vr, {masterAwaitingRequest, Master}, []),
-    gen_fsm:start_link({local, replica1}, vr, {replicaAwaitingPrepare, Master}, []),
-    gen_fsm:send_event(Master, {request, fun vr:clientRequestFun/0, 1, 1}).
+    startMasterNode(Master, fun commitAsReplicaTest/1),
+    startReplicaNode(replica1, Master, fun commitAsReplicaTest/1),
+    handleClientRequest(Master, {hello, testClient, 1}).
 
 
 
