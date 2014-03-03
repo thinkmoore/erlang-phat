@@ -12,16 +12,16 @@ replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCom
     State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
     io:fwrite("got prepare~n"),
     if 
-        (MasterOpNumber == OpNumber + 1) and (CommitNumber == MasterCommitNumber) ->
+        (MasterCommitNumber == CommitNumber) and (MasterOpNumber == OpNumber + 1)  ->
             io:fwrite("good prepare ~n"),
             NewOpNumber = MasterOpNumber,
             NewCommitNumber = CommitNumber;
-        (MasterOpNumber > OpNumber  + 1) ->
+        (MasterCommitNumber > CommitNumber) and (MasterCommitNumber > OpNumber) ->
             io:fwrite("initiate state transfer~n"),
             NewOpNumber = OpNumber,
             NewCommitNumber = CommitNumber;
-        (OpNumber == MasterCommitNumber) and (MasterOpNumber == OpNumber + 1) ->
-            io:fwrite("Ops ~s to ~s got committed", [CommitNumber, MasterCommitNumber]),
+        (MasterCommitNumber > CommitNumber) and (MasterCommitNumber == OpNumber) ->
+            io:fwrite("Ops ~s to ~s got committed ~n", [CommitNumber, MasterCommitNumber]),
             % commit them
             NewOpNumber = MasterOpNumber,
             NewCommitNumber = MasterCommitNumber;
