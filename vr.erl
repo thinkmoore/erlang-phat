@@ -1,12 +1,23 @@
 -module(vr).
--export([start/1, init/1, masterAwaitingRequest/2, terminate/3, stop/0, handle_event/3]).
+-export([start/0, init/1, masterAwaitingRequest/2, replicaAwaitingPrepare/2, terminate/3, stop/0, handle_event/3]).
 -behavior(gen_fsm).
 
-init([Master]) when Master == node() ->
-    {ok, masterAwaitingRequest, {[], Master, dict:new(), 0, 0, 0}};
+init([Master]) when Master == youAre ->
+    io:fwrite("i am master\n"),
+    {ok, masterAwaitingRequest, {[], self(), dict:new(), 0, 0, 0}};
 init([Master]) ->
-    io:fwrite("i am ~s", [Master]),
+    %io:fwrite("~p i am ~s", [self(), Master]),
     {ok, replicaAwaitingPrepare, {[], Master, dict:new(), 0, 0, 0}}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% REPLICA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+replicaAwaitingPrepare({prepare, ViewNumber, Op, NewOpNumber, CommitNumber}, 
+    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
+    io:fwrite("got prepare!\n"),
+    {stop, normal, State}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MASTER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
 broadcastToReplicas(Master,Message) ->
@@ -15,7 +26,7 @@ broadcastToReplicas(Master,Message) ->
             io:fwrite("hello"),
               gen_fsm:send_event(Replica,Message)
       end,
-      [Node || Node <- nodes(), Node =/= Master]).
+      [Node || Node <- all_nodes(), Node =/= Master]).
 
 masterAwaitingRequest({request, Op, Client, RequestNum}, State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
     io:fwrite("in master awaiting request\n"),
@@ -25,7 +36,7 @@ masterAwaitingRequest({request, Op, Client, RequestNum}, State = {Log, Master, C
         {ok, {N, unknown}} when RequestNum == N -> 
             io:fwrite("drop-still working on it\n"), {next_state, masterAwaitingRequest, State};
         {ok, {N, LastValue}} when RequestNum == N -> 
-            % resend(),
+            % resend(), XXX FIXME TODO
             {next_state, masterAwaitingRequest, State};
         _ -> 
             io:fwrite("new request ~p by ~p", [RequestNum, Client]),
@@ -45,7 +56,12 @@ handle_event(stop, _, State) ->
 terminate(_,_,_) ->
     io:fwrite("terminating!\n").
 
-start(Master) -> gen_fsm:start_link({local, vr}, vr, [Master], []),
+all_nodes() ->
+    [vr, vr2].
+
+start() -> 
+    MasterP = gen_fsm:start_link({local, vr}, vr, [youAre], []),
+    gen_fsm:start_link({local, vr2}, vr, [MasterP], []),
     gen_fsm:send_event(vr, {request, hello, 1, 1}).
 
 
