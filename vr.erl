@@ -33,8 +33,8 @@ replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCom
     {stop, normal, State}.
 
 
-%replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCommitNumber}, 
-%    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
+replicaAwaitingPrepare({prepare, MasterViewNumber, Op, MasterOpNumber, MasterCommitNumber}, 
+    State = {Log, Master, ClientsTable, OpNumber, CommitNumber, ViewNumber}) ->
     
 
 
