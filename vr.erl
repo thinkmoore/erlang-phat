@@ -1,4 +1,4 @@
--module(vr2).
+-module(vr).
 -export([startNode/4, startPrepare/4, stop/1]).
 -export([test/0]).
 -export([master/2, replica/2, handle_event/3, init/1, terminate/3]).
@@ -13,12 +13,11 @@ startNode(NodeName, MasterNode, AllNodes, CommitFn) ->
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
         uncommittedLog => [],
         commitNumber => 0, prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName },
-    if 
-        NodeName == MasterNode ->
-            gen_fsm:start_link({local, NodeName}, vr2, {master, S}, []);
-        true ->
-            gen_fsm:start_link({local, NodeName}, vr2, {replica, S}, [])
-    end.
+    Start = if 
+        NodeName == MasterNode -> master;
+        true -> replica
+    end,
+    gen_fsm:start_link({local, NodeName}, vr, {Start, S}, []).
 
 startPrepare(NodeName, Client, RequestNum, Op) ->
     gen_fsm:send_event(NodeName, {clientRequest, Client, RequestNum, Op}).
