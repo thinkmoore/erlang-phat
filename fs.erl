@@ -14,7 +14,7 @@ open(Handle,SubPath) ->
 mkfile(Handle,SubPath,Data) ->
     gen_server:call(fs,{mkfile,Handle,SubPath,Data}).
 mkdir(Handle,SubPath) ->
-    gen_server:call(fs,{mkdir,Handle,SubPath,}).
+    gen_server:call(fs,{mkdir,Handle,SubPath}).
 getcontents(Handle) ->
     gen_server:call(fs,{getcontents,Handle}).
 putcontents(Handle,Data) ->
@@ -72,14 +72,14 @@ handle_call({readdir,Handle},_,State) ->
 handle_call({stat,Handle},_,State) ->
     {reply,readdir(Handle,State),State};
 handle_call({flock,Handle,LockType},_,State) ->
-    {Resp,NewState} =flock(Handle,LockType,State)
+    {Resp,NewState} = flock(Handle,LockType,State),
     {reply,Resp,NewState};
 handle_call({funlock,Handle},_,State) ->
-    {Resp,NewState} =funlock(Handle,State)
+    {Resp,NewState} = funlock(Handle,State),
     {reply,Resp,NewState};
 handle_call({remove,Handle},_,State) ->
-    {Resp,NewState} =remove(Handle,State)
-    {reply,Resp,NewState};
+    {Resp,NewState} = remove(Handle,State),
+    {reply,Resp,NewState}.
 
 %% State = { Map path := entry }  
 %% entry = { file, lock_status, data } | {dir, lock_status, entry list}
@@ -108,8 +108,8 @@ mkfile({handle,Path},Subpath,Data,State) ->
 		{{dir,Locks,Children},WithDirs} ->
 		    NewState = dict:store(Dirs,{dir,Locks,[Name|Children]},WithDirs),
 		    Handle = {ok,{handle,[Name|Dirs]}},
-		    Locks = #{read => {0, 0}, write => {0, unlocked}};
-		    {Handle,dict:store([Name|Dirs], {file,Locks,NewState)};
+		    Locks = #{read => {0, 0}, write => {0, unlocked}},
+		    {Handle,dict:store([Name|Dirs], {file,Locks,NewState})};
 	      	Error -> {Error, State}
 	    end;
 	_ -> 
@@ -194,19 +194,19 @@ flock({handle,Path},LockType,State) ->
 	error ->
 	    {{error, file_or_dir_not_found},State};
 	{ok, {Type, Locks, DataOrChildren}} ->
-	    #{read={ReadSeq,NumRead}, write={WriteSeq,WriteStatus}} = Locks,
+	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
 	    case {WriteStatus, LockType} of
 		{locked, _} ->
 		    {{error, already_write_locked},State};
 		{unlocked,read} ->
 		    %% adding a read lock, and there wasn't a write lock so we are good to go
-		    NewLocks = Locks#{read={ReadSeq,NumRead+1}},
+		    NewLocks = Locks#{read := {ReadSeq,NumRead+1}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {read, {handle,Path}, ReadSeq},
 		    {{ok, Sequencer}, NewState};		
 		{unlocked,write} when NumRead =:= 0 ->
 		    %% no read lock, taking the write lock
-		    NewLocks = Locks#{write={WriteSeq,locked}},
+		    NewLocks = Locks#{write := {WriteSeq,locked}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {write, {handle,Path}, WriteSeq},
 		    {{ok, Sequencer}, NewState};
@@ -221,16 +221,17 @@ funlock({handle,Path},State) ->
 	error ->
 	    {{error, file_or_dir_not_found},State};
 	{ok, {Type, Locks, DataOrChildren}} ->
-	    #{read={ReadSeq,NumRead}, write={WriteSeq,WriteStatus}} = Locks,
+	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
 	    case WriteStatus of
 		locked ->
 		    %% write locked
-		    NewLocs = Locks#{write={WriteSeq+1,unlocked}},
+		    NewLocks = Locks#{write := {WriteSeq+1,unlocked}},
+                    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {read, {handle,Path}, WriteSeq+1},
 		    {{ok, Sequencer}, NewState};
 		unlocked when NumRead > 0 ->
 		    %% Read locked
-		    NewLocks = Locks#{read={ReadSeq+1,NumRead-1}},
+		    NewLocks = Locks#{read := {ReadSeq+1,NumRead-1}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {read, {handle,Path}, ReadSeq+1},
 		    {{ok, Sequencer}, NewState};
