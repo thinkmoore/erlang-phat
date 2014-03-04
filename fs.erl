@@ -1,10 +1,12 @@
 -module(fs).
 -behavior(gen_server).
+-define(NODEBUG, true). %% comment out for debugging messages
+-include_lib("eunit/include/eunit.hrl").
 
 -export([start_link/0,init/1,terminate/2]).
--export([code_change/3,handle_call/3,handle_cast/2,stop/0]).
+-export([code_change/3,handle_call/3,handle_cast/2,stop/0,handle_info/2]).
 -export([getroot/0,mkfile/3,open/2,getcontents/1,putcontents/2,readdir/1]).
-
+-export([mkdir/2,stat/1,flock/2,funlock/1,remove/1]).
 
 %% Calls into the server
 getroot() ->
@@ -50,6 +52,8 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_,_) ->
     {error,async_unsupported}.
+handle_info(_,_) ->
+    {error, info_unsupported}.
 
 %% Server call backs
 handle_call({getroot},_,State) ->
@@ -60,7 +64,7 @@ handle_call({mkfile,Handle,SubPath,Data},_,State) ->
     {Resp,NewState} = mkfile(Handle,SubPath,Data,State),
     {reply,Resp,NewState};
 handle_call({mkdir,Handle,SubPath},_,State) ->
-    {Resp,NewState} = mkfile(Handle,SubPath,State),
+    {Resp,NewState} = mkdir(Handle,SubPath,State),
     {reply,Resp,NewState};
 handle_call({getcontents,Handle},_,State) ->
     {reply,getcontents(Handle,State),State};
@@ -70,7 +74,7 @@ handle_call({putcontents,Handle,Data},_,State) ->
 handle_call({readdir,Handle},_,State) ->
     {reply,readdir(Handle,State),State};
 handle_call({stat,Handle},_,State) ->
-    {reply,readdir(Handle,State),State};
+    {reply,stat(Handle,State),State};
 handle_call({flock,Handle,LockType},_,State) ->
     {Resp,NewState} = flock(Handle,LockType,State),
     {reply,Resp,NewState};
@@ -93,10 +97,12 @@ getroot(_) ->
 
 open({handle,Path}, Subpath, State) ->
     Fullpath = lists:append(Subpath,Path),
-    case dict:fetch(Fullpath,State) of
+    case dict:find(Fullpath,State) of
 	error ->
+	    ?debugFmt("file not found in open: ~p~n",[Fullpath]),
 	    {error,file_not_found};
 	_ -> 
+	    ?debugFmt("opened: ~p~n",[Fullpath]),
 	    {ok,{handle,Fullpath}}
     end.	
 
@@ -109,8 +115,12 @@ mkfile({handle,Path},Subpath,Data,State) ->
 		    NewState = dict:store(Dirs,{dir,Locks,[Name|Children]},WithDirs),
 		    Handle = {ok,{handle,[Name|Dirs]}},
 		    NewLocks = #{read => {0, 0}, write => {0, unlocked}},
-		    {Handle,dict:store([Name|Dirs], {file,NewLocks,NewState})};
-	      	Error -> {Error, State}
+		    FinalState = dict:store([Name|Dirs], {file,NewLocks,Data}, NewState),
+		    ?debugFmt("mkfile final state: ~n~p~n", [NewState]),
+		    {Handle,FinalState};
+	      	Error -> 
+		    ?debugFmt("mkfile, error making dirs ~p~n", [Error]),
+		    {Error, State}
 	    end;
 	_ -> 
 	    {{error,file_already_exists},State}
@@ -139,8 +149,9 @@ mkdir({handle,Path},Subpath,State) ->
     case dict:find(Dirs,State) of
 	error ->
 	    case mkdirs(Dirs,State) of
-		{{dir,Locks,Children},WithDirs} ->
+		{{dir,_,_},WithDirs} ->
 		    Handle = {ok,{handle,WithDirs}},
+		    ?debugFmt("mkdir final state: ~n~p~n", [WithDirs]),
 		    {Handle,WithDirs};
 		Error ->
 		    {Error,State}
@@ -172,7 +183,9 @@ getcontents({handle,Path},State) ->
 putcontents({handle,Path},Data,State) ->
     case dict:find(Path,State) of
 	{ok, {file,LockState,_}} ->
-	    {ok,dict:store(Path,{file,LockState,Data},State)};
+	    NewState = dict:store(Path,{file,LockState,Data},State),
+	    ?debugFmt("mkdir final state: ~p~n~p~n", [Path,NewState]),
+	    {ok,NewState};
 	{ok, {dir,_,_}} ->
 	    {{error, not_a_file},State};
 	error -> 
@@ -197,21 +210,22 @@ flock({handle,Path},LockType,State) ->
 	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
 	    case {WriteStatus, LockType} of
 		{locked, _} ->
+		    ?debugFmt("ERROR flock with existing write: ~p~n~p~n", [Path,State]),
 		    {{error, already_write_locked},State};
 		{unlocked,read} ->
-		    %% adding a read lock, and there wasn't a write lock so we are good to go
 		    NewLocks = Locks#{read := {ReadSeq,NumRead+1}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {read, {handle,Path}, ReadSeq},
+		    ?debugFmt("flock read final state: ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};		
 		{unlocked,write} when NumRead =:= 0 ->
-		    %% no read lock, taking the write lock
 		    NewLocks = Locks#{write := {WriteSeq,locked}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {write, {handle,Path}, WriteSeq},
+		    ?debugFmt("flock write final state ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};
 		{unlocked,write} -> 
-		    %% there is at least one read lock
+		    ?debugFmt("ERROR flock write with existing read: ~p~n~p~n", [Path,State]),
 		    {{error, already_read_locked},State}
 	    end
     end.
@@ -224,19 +238,20 @@ funlock({handle,Path},State) ->
 	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
 	    case WriteStatus of
 		locked ->
-		    %% write locked
 		    NewLocks = Locks#{write := {WriteSeq+1,unlocked}},
                     NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
-		    Sequencer = {read, {handle,Path}, WriteSeq+1},
+		    Sequencer = {write, {handle,Path}, WriteSeq+1},
+		    ?debugFmt("funlock final state: ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};
 		unlocked when NumRead > 0 ->
 		    %% Read locked
 		    NewLocks = Locks#{read := {ReadSeq+1,NumRead-1}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
 		    Sequencer = {read, {handle,Path}, ReadSeq+1},
+		    ?debugFmt("funlock final state: ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};
 		unlocked ->
-		    %% Nothing was locked
+		    ?debugFmt("ERROR funlock not locked: ~p~n~p~n", [Path,State]),
 		    {{error, file_or_dir_not_locked},State}
 	    end
     end.
@@ -246,12 +261,29 @@ remove({handle,Path},State) ->
 	error ->
 	    {{error, file_or_dir_not_found},State};
 	{ok, {file,_,_}} ->
-	    {ok,dict:erase(Path,State)};
+	    NewState = dict:erase(Path,State),
+	    [Name|PathTo] = Path,
+	    %% assuming the parent is here
+	    {ok, {dir,Locks,Children}} = dict:find(PathTo,State),
+	    %% TODO is keydelete slow?
+	    NewChildren = Children--[Name],
+	    NewNewState = dict:store(PathTo,{dir,Locks,NewChildren},NewState),
+	    ?debugFmt("remove final state: ~p~n~p~n", [Path,NewNewState]),
+	    {ok,NewNewState};
 	{ok, {dir,_,Children}} ->
 	    case Children of
 		[] ->
-		    {ok,dict:erase(Path,State)};
+		    NewState = dict:erase(Path,State),
+		    [Name|PathTo] = Path,
+		    %% assuming the parent is here
+		    {ok, {dir,Locks,Children}} = dict:find(PathTo,State),
+		    %% TODO is keydelete slow?
+		    NewChildren = Children--[Name],
+		    NewNewState = dict:store(PathTo,{dir,Locks,NewChildren},NewState),
+		    ?debugFmt("remove final state: ~p~n~p~n", [Path,NewNewState]),
+		    {ok,NewNewState};
 		_ ->
+		    ?debugFmt("ERROR nonempty dir: ~p~n~p~n", [Path,State]),
 		    {{error, cannot_remove_nonempty_dir},State}
 	    end
     end.
