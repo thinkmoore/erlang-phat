@@ -98,7 +98,7 @@ doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn,
             io:fwrite("committing ~p on master~n", [ON]),
             Result = case CommitFn(C, Op, master) of
                 {reply, Res} ->
-                    sendToClient(C, {reply, RN, Res}),
+                    sendToClient(C, {RN, Res}),
                     Res;
                 _ ->
                     io:fwrite("not replying to client per app request~n"),
@@ -184,6 +184,7 @@ init({NodeStatus, State}) ->
     {ok, NodeStatus, State}.
 
 sendToClient(Client, Message) ->
+    io:fwrite("Sending to client ~p: ~p~n", [Client,Message]),
     Client ! Message.
 
 sendToMaster(Master, Message) ->
