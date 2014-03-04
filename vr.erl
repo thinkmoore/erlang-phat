@@ -289,7 +289,7 @@ testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     waitBetweenTests(5000),
     rpc:call(N1, vr, stop, [Node1]),
     rpc:call(N2, vr, stop, [Node2]),
-    rpc:call(N3, vr, stop, [Node3]).
+    rpc:call(N3, vr, stop, [Node3]),
     io:fwrite("done").
 
 waitBetweenTests(Time) ->

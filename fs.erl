@@ -108,8 +108,8 @@ mkfile({handle,Path},Subpath,Data,State) ->
 		{{dir,Locks,Children},WithDirs} ->
 		    NewState = dict:store(Dirs,{dir,Locks,[Name|Children]},WithDirs),
 		    Handle = {ok,{handle,[Name|Dirs]}},
-		    Locks = #{read => {0, 0}, write => {0, unlocked}},
-		    {Handle,dict:store([Name|Dirs], {file,Locks,NewState})};
+		    NewLocks = #{read => {0, 0}, write => {0, unlocked}},
+		    {Handle,dict:store([Name|Dirs], {file,NewLocks,NewState})};
 	      	Error -> {Error, State}
 	    end;
 	_ -> 
