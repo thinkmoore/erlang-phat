@@ -1,6 +1,6 @@
--module(vr2).
+-module(vr).
 -export([startNode/4, startPrepare/4, stop/1]).
--export([test/0]).
+-export([test/1]).
 -export([master/2, replica/2, handle_event/3, init/1, terminate/3]).
 -behavior(gen_fsm).
 
@@ -8,20 +8,20 @@
 %% INTERFACE CODE -- use startNode and startPrepare
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-startNode(NodeName, MasterNode, AllNodes, CommitFn) ->
+startNode(NodeName = {Name,_Node}, MasterNode, AllNodes, CommitFn) ->
     S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => AllNodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
         uncommittedLog => [],
         commitNumber => 0, prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName },
     if 
         NodeName == MasterNode ->
-            gen_fsm:start_link({local, NodeName}, vr2, {master, S}, []);
+            gen_fsm:start_link({local, Name}, vr, {master, S}, []);
         true ->
-            gen_fsm:start_link({local, NodeName}, vr2, {replica, S}, [])
+            gen_fsm:start_link({local, Name}, vr, {replica, S}, [])
     end.
 
 startPrepare(NodeName, Client, RequestNum, Op) ->
-    gen_fsm:send_event(NodeName, {clientRequest, Client, RequestNum, Op}).
+    sendToMaster(NodeName, {clientRequest, Client, RequestNum, Op}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% MASTER CODE
@@ -187,6 +187,7 @@ sendToClient(Client, Message) ->
     Client ! Message.
 
 sendToMaster(Master, Message) ->
+    io:fwrite("Sending ~p to ~p~n", [Message,Master]),
     gen_fsm:send_event(Master, Message).
 
 sendToReplicas(Master, Nodes, Message) ->
@@ -222,29 +223,29 @@ testPrintCommit(Client, Op, NodeType) ->
     % or doNotReply
     {reply, {done, Op}}.
 
-testOldvalue() ->
+testOldValue(Node1 = {_,N1},Node2 = {_,N2}) ->
     Commit = fun testPrintCommit/3,
-    Nodes = [node1, node2],
-    startNode(node1, node1, Nodes, Commit),
-    startNode(node2, node1, Nodes, Commit),
-    startPrepare(node1, self(), 1, hello),
+    Nodes = [Node1,Node2],
+    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
+    startPrepare(Node1, self(), 1, hello),
     testReceiveResult(),
-    startPrepare(node1, self(), 1, hello),
+    startPrepare(Node1, self(), 1, hello),
     testReceiveResult(),
-    stop(node1),
-    stop(node2).
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]).
 
-testTwoCommits() ->
+testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
     Commit = fun testPrintCommit/3,
-    Nodes = [node1, node2],
-    startNode(node1, node1, Nodes, Commit),
-    startNode(node2, node1, Nodes, Commit),
-    startPrepare(node1, self(), 1, hello1),
+    Nodes = [Node1,Node2],
+    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
+    startPrepare(Node1, self(), 1, hello1),
     testReceiveResult(),
-    startPrepare(node1, self(), 2, hello2),
+    startPrepare(Node1, self(), 2, hello2),
     testReceiveResult(),
-    stop(node1),
-    stop(node2).
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]).
 
 waitBetweenTests() ->
     receive
@@ -252,10 +253,17 @@ waitBetweenTests() ->
         100 -> ok
     end.
 
-test() ->
+test(local) ->
+    Node1 = {vr1,node()},
+    Node2 = {vr2,node()},
+    runTest(Node1,Node2);
+test({remote,Node1,Node2}) ->
+    runTest({vr,Node1},{vr,Node2}).
+
+runTest(Node1,Node2) ->
     io:fwrite("~n~n--- Testing old value send...~n"),
-    testOldvalue(),
+    testOldValue(Node1,Node2),
     waitBetweenTests(),
     io:fwrite("~n~n--- Testing two commits...~n"),
-    testTwoCommits(),
+    testTwoCommits(Node1,Node2),
     io:fwrite("~n~n--- Tests complete ~n").
