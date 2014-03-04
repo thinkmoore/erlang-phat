@@ -1,7 +1,7 @@
 -module(vr).
 -export([startNode/4, startPrepare/4, stop/1]).
 -export([test/1]).
--export([master/2, replica/2, handle_event/3, init/1, terminate/3]).
+-export([master/2, replica/2, viewChange/2, handle_event/3, init/1, terminate/3]).
 -behavior(gen_fsm).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -9,10 +9,11 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 startNode(NodeName = {Name,_Node}, MasterNode, AllNodes, CommitFn) ->
-    S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => AllNodes, 
+    S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => lists:sort(AllNodes), 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
-        uncommittedLog => [], timeout => 4000, commitNumber => 0, 
-        prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName },
+        uncommittedLog => [], timeout => 3100, commitNumber => 0, viewChanges => [],
+        prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName,
+        doViewChanges => dict:new() },
     if 
         NodeName == MasterNode ->
             gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 1000 }}, []);
@@ -32,6 +33,12 @@ master(timeout, #{ allNodes := AllNodes, masterNode := MasterNode,
     io:fwrite("idle, sending commit~n"),
     sendToReplicas(MasterNode, AllNodes, {commit, ViewNumber, CommitNumber}),
     {next_state, master, State, Timeout};
+
+master({commit, MasterViewNumber, _}, #{ timeout := Timeout, 
+    viewNumber := ViewNumber} = State)
+    when MasterViewNumber > ViewNumber ->
+    io:fwrite("my view is out of date, need state transfer~n"),
+    {next_state, stateTransfer, State, Timeout};
 
 master({clientRequest, Client, RequestNum, Op}, 
     #{ clientsTable := ClientsTable, allNodes := AllNodes, masterNode := MasterNode, 
@@ -95,7 +102,11 @@ master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
                 commitNumber := OpNumber, uncommittedLog := NLog, clientsTable := CTable }, Timeout};
         true ->
             {next_state, master, State#{ masterBuffer := MB }, Timeout}
-    end.
+    end;
+
+master(UknownMessage, State) ->
+    io:fwrite("master got unknown message: ~p~n", [UknownMessage]),
+    {next_state, master, State}.
 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
 doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn, 
@@ -159,10 +170,141 @@ replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ timeout := Timeout,
 
 replica({prepare, _, Op, OpNumber, MasterCommitNumber, Client, RequestNum}, 
     #{ prepareBuffer := PrepareBuffer } = State) ->
-    io:fwrite("got prepare request~n"),
     Message = {OpNumber, Op, Client, RequestNum},
     NewPrepareBuffer = lists:sort([Message|PrepareBuffer]),
-    processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, State).
+    processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, State);
+
+replica(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Nodes, 
+    timeout := Timeout, masterNode := MasterNode } = State) ->
+    NewViewNumber = ViewNumber + 1,
+    NewMaster = chooseMaster(State, NewViewNumber),
+    io:fwrite("timeout -- MASTER HAS FAILED?? I think new master is now ~p - initiating view change~n", [NewMaster]),
+    sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
+    {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode, 
+        masterNode := NewMaster }, Timeout };
+
+replica({startViewChange, _, _} = VC, State) ->
+    handleStartViewChange(VC, State, replica);
+
+replica(UknownMessage, State) ->
+    io:fwrite("replica got unknown message: ~p~n", [UknownMessage]),
+    {next_state, replica, State}.
+
+viewChange({startViewChange, _, _} = VC, State) ->
+    handleStartViewChange(VC, State, viewChange);
+
+viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node}, 
+    #{ doViewChanges := DoViewChanges, masterNode := MasterNode, myNode := MyNode,
+        log := MyLog, opNumber := OpNumber, commitNumber := CommitNumber,
+        allNodes := AllNodes, timeout := Timeout, viewNumber := ViewNumber } = State)
+    when (MasterNode == MyNode) and (ViewNumber =< NViewNumber) ->
+    io:fwrite("received doViewChange~n"),
+    F = (length(AllNodes) - 1) / 2,
+    case dict:find(Node, DoViewChanges) of
+        {ok, _} ->
+            {next_state, viewChange, State, Timeout};
+        error ->
+            VCSizes = dict:size(DoViewChanges),
+            if 
+                (VCSizes + 1) > F ->
+                    % process new master, startView
+                    io:fwrite("becoming master~n"),
+                    {MaxLog, MaxOp, MaxCommit, MaxView} = 
+                        findLargestLog(DoViewChanges, {MyLog, OpNumber, CommitNumber, ViewNumber}),
+                    if 
+                        CommitNumber < MaxCommit ->
+                            io:fwrite("committing undone things~n"),
+                            throw({notyetdonesorry});
+                        true ->
+                            io:fwrite("no need to commit undone things, all up to date!~n")
+                    end,
+                    sendToReplicas(MasterNode, AllNodes, {startView, MaxView, MaxLog, MaxOp, MaxCommit, MasterNode}),
+                    {next_state, master, State#{ doViewChanges := dict:new(), viewChanges := [],
+                        log := MaxLog, opNumber := MaxOp, commitNumber := MaxCommit, viewNumber := MaxView
+                     }, Timeout};
+                true ->
+                    NewDoViewChanges = dict:store(Node, {NLog, NOpNumber, NCommitNumber, NViewNumber}, DoViewChanges),
+                    {next_state, viewChange, State#{ doViewChanges := NewDoViewChanges }, Timeout}
+            end
+    end;
+
+viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From}, 
+    #{ masterNode := MasterNode, 
+        commitNumber := CommitNumber,
+        timeout := Timeout, viewNumber := ViewNumber } = State)
+    when  (MasterNode == From) and (ViewNumber =< MaxView) ->
+    io:fwrite("got start view~n"),
+    if 
+        CommitNumber < MaxCommit ->
+            io:fwrite("committing undone things~n"),
+            throw({notyetdonesorry});
+        true ->
+            io:fwrite("no need to commit undone things, all up to date!~n")
+    end,
+    io:fwrite("returning to normal operation as replica~n"),
+    {next_state, replica, State#{ viewNumber := MaxView, opNumber := MaxOp, 
+        commitNumber := CommitNumber, log := MaxLog, doViewChanges := dict:new(), 
+        viewChanges := [] }, Timeout};
+
+viewChange(UknownMessage, State) ->
+    io:fwrite("view changing replica got unknown/invalid message: ~p~n", [UknownMessage]),
+    {next_state, viewChange, State}.
+
+findLargestLog(DoViewChanges, {_Log, _ON, _KN, _VN} = Init) ->
+    dict:fold(fun(_, {CLog, CON, CKN, CVN}, {ALog, AON, AKN, AVN}) ->
+        if
+            (CVN >= AVN) and (CON >= AON) ->
+                {CLog, CON, CKN, CVN};
+            (CVN == AVN) and (CKN >= AKN) ->
+                {ALog, AON, CKN, AVN};
+            true ->
+                {ALog, AON, AKN, AVN}
+        end
+    end, Init, DoViewChanges).
+
+chooseMaster(#{ allNodes := AllNodes }, ViewNumber) ->
+    lists:nth((ViewNumber rem length(AllNodes)) + 1, AllNodes).
+
+%%% XXX: This is pretty inefficient, instead should keep being a replica,
+%%% because one timedout replica will force an entire view change
+handleStartViewChange({startViewChange, NewViewNumber, Node} = VC, 
+    #{ viewNumber := ViewNumber, myNode := MyNode, 
+    allNodes := Nodes } = State, OldState)
+    when ViewNumber < NewViewNumber ->
+    OldView = NewViewNumber - 1,
+    OldMaster = chooseMaster(State, OldView),
+    NewMaster = chooseMaster(State, NewViewNumber),
+    io:fwrite("Starting view change because I see a view change. "),
+    io:fwrite("I think new master is now ~p~n", [NewMaster]),
+    
+    sendToReplicas(OldMaster, Nodes, {startViewChange, NewViewNumber, MyNode}),
+    
+    handleStartViewChange(VC, State#{ viewNumber := NewViewNumber, 
+        viewChanges := [Node], masterNode := chooseMaster(State, NewViewNumber) }, OldState);
+
+handleStartViewChange({startViewChange, NewViewNumber, Node}, 
+    #{ viewNumber := ViewNumber, myNode := MyNode, timeout := Timeout,  allNodes := AllNodes,
+    commitNumber := CommitNumber, opNumber := OpNumber, log := Log,
+    viewChanges := ViewChanges, masterNode := MasterNode } = State, _OldState)
+    when ViewNumber == NewViewNumber ->
+    io:fwrite("processing startViewChange~n"),
+    F = (length(AllNodes) - 1) / 2,
+    IsMember = lists:member(Node, ViewChanges),
+    if
+        IsMember -> 
+            {next_state, viewChange, State, Timeout};
+        (length(ViewChanges) + 1) > F ->
+            sendToMaster(MasterNode, {doViewChange, ViewNumber, Log, OpNumber, CommitNumber, MyNode}),
+            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }};
+        true ->
+            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }}
+    end;
+
+handleStartViewChange({startViewChange, NewViewNumber, _Node}, 
+    #{ timeout := Timeout, viewNumber := ViewNumber } = State, OldState)
+    when ViewNumber > NewViewNumber ->
+    io:fwrite("ignoring old view change~n"),
+    {next_state, OldState, State, Timeout}.
 
 processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, 
     #{ timeout := Timeout } = State) ->
@@ -180,6 +322,7 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
             sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode}),
             {next_state, replica, NewState, Timeout}
     end.
+
 
 processBuffer(State, [], _) -> State;
 processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber, 
@@ -285,9 +428,13 @@ testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
     rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
     rpc:call(N3, vr, startNode, [Node3, Node1, Nodes, Commit]),
-    io:fwrite("waiting 5 seconds...~n"),
-    waitBetweenTests(5000),
+    startPrepare(Node1, self(), 1, hello1),
+    testReceiveResult(),
     rpc:call(N1, vr, stop, [Node1]),
+    io:fwrite("now killed master, waiting 5 seconds...~n"),
+    waitBetweenTests(4500),
+    startPrepare(Node2, self(), 2, hello2),
+    testReceiveResult(),
     rpc:call(N2, vr, stop, [Node2]),
     rpc:call(N3, vr, stop, [Node3]),
     io:fwrite("done").
@@ -308,12 +455,12 @@ test({remote, Node1, Node2, Node3}) ->
     runTest({vr, Node1}, {vr, Node2}, {vr, Node3}).
 
 runTest(Node1, Node2, Node3) ->
-    io:fwrite("~n~n--- Testing old value send...~n"),
-    testOldValue(Node1, Node2),
-    waitBetweenTests(100),
-    io:fwrite("~n~n--- Testing two commits...~n"),
-    testTwoCommits(Node1, Node2),
-    waitBetweenTests(100),
+    % io:fwrite("~n~n--- Testing old value send...~n"),
+    % testOldValue(Node1, Node2),
+    % waitBetweenTests(100),
+    % io:fwrite("~n~n--- Testing two commits...~n"),
+    % testTwoCommits(Node1, Node2),
+    % waitBetweenTests(100),
     io:fwrite("~n~n--- Testing master failover...~n"),
     testMasterFailover(Node1, Node2, Node3),
     waitBetweenTests(100),
