@@ -11,11 +11,11 @@
 startNode(NodeName = {Name,_Node}, MasterNode, AllNodes, CommitFn) ->
     S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => AllNodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
-        uncommittedLog => [],
-        commitNumber => 0, prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName },
+        uncommittedLog => [], timeout => 4000, commitNumber => 0, 
+        prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName },
     if 
         NodeName == MasterNode ->
-            gen_fsm:start_link({local, Name}, vr, {master, S}, []);
+            gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 1000 }}, []);
         true ->
             gen_fsm:start_link({local, Name}, vr, {replica, S}, [])
     end.
@@ -27,23 +27,29 @@ startPrepare(NodeName, Client, RequestNum, Op) ->
 %% MASTER CODE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+master(timeout, #{ allNodes := AllNodes, masterNode := MasterNode, 
+    commitNumber := CommitNumber, viewNumber := ViewNumber, timeout := Timeout} = State) ->
+    io:fwrite("idle, sending commit~n"),
+    sendToReplicas(MasterNode, AllNodes, {commit, ViewNumber, CommitNumber}),
+    {next_state, master, State, Timeout};
+
 master({clientRequest, Client, RequestNum, Op}, 
     #{ clientsTable := ClientsTable, allNodes := AllNodes, masterNode := MasterNode, 
         viewNumber := ViewNumber, opNumber := OpNumber, 
-        uncommittedLog := UncommittedLog,
+        uncommittedLog := UncommittedLog, timeout := Timeout,
         commitNumber := CommitNumber } = State) ->
     io:fwrite("Got client request as master~n"),
     case dict:find(Client, ClientsTable) of
         {ok, {N, _}} when RequestNum < N ->
             io:fwrite("drop old request~n"),
-            {next_state, master, State};
+            {next_state, master, State, Timeout};
         {ok, {N, inProgress}} when RequestNum == N ->
             io:fwrite("ignoring duplicate request, still in progress~n"),
-            {next_state, master, State};
+            {next_state, master, State, Timeout};
         {ok, {N, Res}} when RequestNum == N ->
             io:fwrite("resending old result~n"),
             sendToClient(Client, {RequestNum, Res}),
-            {next_state, master, State};
+            {next_state, master, State, Timeout};
         _ ->
             io:fwrite("new request received~n"),
             NewClientsTable = dict:store(Client, {RequestNum, inProgress}, ClientsTable),
@@ -52,15 +58,17 @@ master({clientRequest, Client, RequestNum, Op},
             sendToReplicas(MasterNode, AllNodes, 
                 {prepare, ViewNumber, Op, NewOpNumber, CommitNumber, Client, RequestNum}),
             {next_state, master, State#{ clientsTable := NewClientsTable, 
-                uncommittedLog := NewLog, opNumber := NewOpNumber } }
+                uncommittedLog := NewLog, opNumber := NewOpNumber }, Timeout }
     end;
 
-master({prepareOk, ViewNumber, _, _}, #{ viewNumber := MasterViewNumber })
+master({prepareOk, ViewNumber, _, _}, #{ viewNumber := MasterViewNumber,
+    timeout := Timeout } = State)
     when ViewNumber < MasterViewNumber ->
-    io:fwrite("ignoring prepareOk from old view"); 
+    io:fwrite("ignoring prepareOk from old view"), 
+    {next_state, master, State, Timeout};
 
 master({prepareOk, _, OpNumber, ReplicaNode} = Msg, 
-    #{ masterBuffer := MasterBuffer, allNodes := AllNodes, 
+    #{ masterBuffer := MasterBuffer, allNodes := AllNodes, timeout := Timeout,
         uncommittedLog := UncommittedLog, commitNumber := CommitNumber } = State) ->
     io:fwrite("received prepareok ~p~n", [Msg]),
     F = (length(AllNodes) - 1) / 2,
@@ -84,9 +92,9 @@ master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
         length(AllOks) >= F -> 
             {NLog, CTable} = doCommits(CommitNumber, OpNumber, lists:sort(UncommittedLog), State),
             {next_state, master, State#{ masterBuffer := MB, 
-                commitNumber := OpNumber, uncommittedLog := NLog, clientsTable := CTable }};
+                commitNumber := OpNumber, uncommittedLog := NLog, clientsTable := CTable }, Timeout};
         true ->
-            {next_state, master, State#{ masterBuffer := MB }}
+            {next_state, master, State#{ masterBuffer := MB }, Timeout}
     end.
 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
@@ -114,27 +122,50 @@ doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn,
 %% REPLICA CODE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-replica({clientRequest, Client, _, _}, State) ->
+replica({commit, MasterViewNumber, _}, #{ timeout := Timeout, 
+    viewNumber := ViewNumber} = State)
+    when MasterViewNumber > ViewNumber ->
+    io:fwrite("my view is out of date, need state transfer~n"),
+    {next_state, stateTransfer, State, Timeout};
+
+replica({commit, MasterViewNumber, _}, #{ timeout := Timeout,
+    viewNumber := ViewNumber} = State)
+    when MasterViewNumber < ViewNumber ->
+    io:fwrite("ignoring prepare from old view~n"),
+    {next_state, replica, State, Timeout};
+
+replica({commit, _, MasterCommitNumber}, 
+    #{ prepareBuffer := PrepareBuffer, opNumber := OpNumber } = State) ->
+    io:fwrite("got commit request~n"),
+    processPrepareOrCommit(OpNumber, MasterCommitNumber, PrepareBuffer, State);
+
+replica({clientRequest, Client, _, _}, #{ timeout := Timeout } = State) ->
     io:fwrite("Got client request as replica~n"),
     MasterNode = maps:get(masterNode, State),
     sendToClient(Client, {notMaster, MasterNode }),
-    {next_state, replica, State};
+    {next_state, replica, State, Timeout};
 
-replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ viewNumber := ViewNumber} = State)
+replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ timeout := Timeout, 
+    viewNumber := ViewNumber} = State)
     when MasterViewNumber > ViewNumber ->
     io:fwrite("my view is out of date, need state transfer~n"),
-    {next_state, stateTransfer, State};
+    {next_state, stateTransfer, State, Timeout};
 
-replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ viewNumber := ViewNumber} = State)
+replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ timeout := Timeout,
+    viewNumber := ViewNumber} = State)
     when MasterViewNumber < ViewNumber ->
     io:fwrite("ignoring prepare from old view~n"),
-    {next_state, replica, State};
+    {next_state, replica, State, Timeout};
 
 replica({prepare, _, Op, OpNumber, MasterCommitNumber, Client, RequestNum}, 
     #{ prepareBuffer := PrepareBuffer } = State) ->
     io:fwrite("got prepare request~n"),
     Message = {OpNumber, Op, Client, RequestNum},
     NewPrepareBuffer = lists:sort([Message|PrepareBuffer]),
+    processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, State).
+
+processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, 
+    #{ timeout := Timeout } = State) ->
     NewState = processBuffer(State#{ prepareBuffer := NewPrepareBuffer }, 
         NewPrepareBuffer, MasterCommitNumber),
     #{  masterNode := MasterNode,  viewNumber := ViewNumber,
@@ -143,11 +174,11 @@ replica({prepare, _, Op, OpNumber, MasterCommitNumber, Client, RequestNum},
         CommitNumber < MasterCommitNumber ->
             % todo send getstate
             io:fwrite("missed an op, need state transfer"),
-            {next_state, stateTransfer, NewState};
+            {next_state, stateTransfer, NewState, Timeout};
         true ->
             io:fwrite("replica completed up to K=~p,O=~p~n", [CommitNumber, OpNumber]),
             sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode}),
-            {next_state, replica, NewState}
+            {next_state, replica, NewState, Timeout}
     end.
 
 processBuffer(State, [], _) -> State;
@@ -180,8 +211,8 @@ processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber,
 %% Utility functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({NodeStatus, State}) ->
-    {ok, NodeStatus, State}.
+init({NodeStatus, #{ timeout := Timeout } = State}) ->
+    {ok, NodeStatus, State, Timeout}.
 
 sendToClient(Client, Message) ->
     Client ! Message.
@@ -247,23 +278,42 @@ testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
     rpc:call(N1, vr, stop, [Node1]),
     rpc:call(N2, vr, stop, [Node2]).
 
-waitBetweenTests() ->
+testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
+    Commit = fun testPrintCommit/3,
+    Nodes = [Node1, Node2, Node3],
+    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
+    rpc:call(N3, vr, startNode, [Node3, Node1, Nodes, Commit]),
+    io:fwrite("waiting 5 seconds...~n"),
+    waitBetweenTests(5000),
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]),
+    rpc:call(N3, vr, stop, [Node3]).
+    io:fwrite("done").
+
+waitBetweenTests(Time) ->
     receive
     after
-        100 -> ok
+        Time -> ok
     end.
 
 test(local) ->
     Node1 = {vr1,node()},
     Node2 = {vr2,node()},
-    runTest(Node1,Node2);
-test({remote,Node1,Node2}) ->
-    runTest({vr,Node1},{vr,Node2}).
+    Node3 = {vr3,node()},
+    runTest(Node1, Node2, Node3);
 
-runTest(Node1,Node2) ->
+test({remote, Node1, Node2, Node3}) ->
+    runTest({vr, Node1}, {vr, Node2}, {vr, Node3}).
+
+runTest(Node1, Node2, Node3) ->
     io:fwrite("~n~n--- Testing old value send...~n"),
-    testOldValue(Node1,Node2),
-    waitBetweenTests(),
+    testOldValue(Node1, Node2),
+    waitBetweenTests(100),
     io:fwrite("~n~n--- Testing two commits...~n"),
-    testTwoCommits(Node1,Node2),
+    testTwoCommits(Node1, Node2),
+    waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing master failover...~n"),
+    testMasterFailover(Node1, Node2, Node3),
+    waitBetweenTests(100),
     io:fwrite("~n~n--- Tests complete ~n").
