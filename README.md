@@ -9,6 +9,8 @@ Modules
 Usage
 -----
 
+This code requires Erlang R17 due to the use of maps.
+
 1. Compile the modules
 
         $ erlc *.erl
