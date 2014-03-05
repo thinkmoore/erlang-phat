@@ -23,18 +23,22 @@ To test Phat as a whole, launch a few nodes:
 
     $ erl -sname n1@localhost
     $ erl -sname n2@localhost
-    $ ...
+    $ erl -sname n3@localhost
 
 Then on each node (starting with the master), start Phat:
 
-    > phat:start_link([n1@localhost,n2@localhost,...]).
     > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
     
-Then you can play around:
+Then you can play around on the Phat server side:
 
     > phat:test().
     > Response = server:clientRequest(0,{getroot}).
-    
+
+You can also use the Phat client to abstract the Phat wrapper details:
+
+    > client:start_link(n1@localhost).
+    > client:call({getroot}).
+
 You can induce various types of failures using the `phat` module.
 `phat:inject_fault/1` takes as an argument a module to inject a fault into
 on the current node (one of `fs`, `ps`, or `vr`). All other modules are brought
