@@ -9,7 +9,7 @@
 start_link(Master) ->
     gen_server:start_link({local,client},client,[Master],[]).
 
-init(Master) ->
+init([Master]) ->
     {ok, #{master => Master, seq => 0}}.
 
 call(Operation) ->
@@ -17,9 +17,10 @@ call(Operation) ->
 
 handle_call(Operation,Caller,State) ->
     #{seq := SeqNum, master := Master} = State,
-    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation], 1000),
+    Client = self(),
+    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation]),
     case Response of
-	{badrpc,timeout} ->
+        timeout ->
 	    ?debugMsg("Timeout, trying again~n"),
 	    handle_call(Operation, Caller, State);
 	{Number,{ok,Result}} -> 
@@ -40,7 +41,7 @@ handle_call(Operation,Caller,State) ->
 		    NewState = State#{seq := SeqNum + 1},
 		    {reply, {error,Cause}, NewState}
 	    end;
-	{notMaster, MasterNode} -> 
+	{notMaster, {_,MasterNode}} -> 
 	    ?debugFmt("Master is actually: ~p, trying again.~n",[MasterNode]),
 	    NewState = State#{master := MasterNode},
 	    handle_call(Operation, Caller, NewState);
