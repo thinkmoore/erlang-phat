@@ -1,11 +1,13 @@
-Erlang Modules:
+Modules
+-------
+
  * `vr.erl`: View-state replication
  * `fs.erl`: Filesystem core
  * `server.erl`: The Phat app server wrapper
  * `phat.erl`: The Phat supervisor, manages the above modules
 
 Usage
-----
+-----
 
 1. Compile the modules
 
