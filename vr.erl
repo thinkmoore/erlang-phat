@@ -345,6 +345,23 @@ handleStartViewChange({startViewChange, NewViewNumber, _Node},
     ?debugFmt("ignoring old view change~n", []),
     {next_state, OldState, State, Timeout}.
 
+processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
+    #{ timeout := Timeout,
+       commitNumber := CommitNumber,
+       masterNode := MasterNode,
+       myNode := MyNode,
+       viewNumber := ViewNumber,
+       allNodes := Nodes} = State)
+  when CommitNumber > MasterCommitNumber ->
+    NewViewNumber = ViewNumber + 1,
+    NewMaster = chooseMaster(State, NewViewNumber),
+    ?debugFmt("initiating view change because master has old commit.", []),
+    ?debugFmt("Master commit was ~p, my commit number is ~p",
+              [MasterCommitNumber, CommitNumber]),
+    sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
+    {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode,
+        masterNode := NewMaster }, Timeout };
+
 processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, 
     #{ timeout := Timeout } = State) ->
     NewState = processBuffer(State#{ prepareBuffer := NewPrepareBuffer }, 
@@ -557,6 +574,33 @@ testRecovery(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     rpc:call(N3, vr, stop, [Node3]),
     io:fwrite("done").
 
+testCyclePrimary(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
+    Commit = fun testPrintCommit/3,
+    Nodes = [Node1, Node2, Node3],
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
+    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
+    startPrepare(Node1, self(), 1, hello1),
+    testReceiveResult(),
+    waitBetweenTests(2100),
+    rpc:call(N1, vr, stop, [Node1]),
+    waitBetweenTests(100),
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    waitBetweenTests(2100),
+    startPrepare(Node1, self(), 2, hello2),
+    testReceiveResult(),
+    waitBetweenTests(2100),
+    startPrepare(Node1, self(), 2, hello2),
+    testReceiveResult(),
+    startPrepare(Node2, self(), 2, hello2),
+    testReceiveResult(),
+    waitBetweenTests(2100),
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]),
+    rpc:call(N3, vr, stop, [Node3]),
+    io:fwrite("done").
+
+
 waitBetweenTests(Time) ->
     receive
     after
@@ -581,10 +625,13 @@ runTest(Node1, Node2, Node3, Node4, Node5) ->
     % io:fwrite("~n~n--- Testing two commits...~n"),
     % testTwoCommits(Node1, Node2),
     % waitBetweenTests(100),
-    io:fwrite("~n~n--- Testing master failover...~n"),
-    testMasterFailover(Node1, Node2, Node3, Node4, Node5),
-    waitBetweenTests(100),
+    % io:fwrite("~n~n--- Testing master failover...~n"),
+    % testMasterFailover(Node1, Node2, Node3, Node4, Node5),
+    % waitBetweenTests(100),
     % io:fwrite("~n~n--- Testing recovery...~n"),
     % testRecovery(Node1, Node2, Node3),
     % waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing primary cycle w/o timeout...~n"),
+    testCyclePrimary(Node1, Node2, Node3),
+    waitBetweenTests(100),
     io:fwrite("~n~n--- Tests complete ~n").
