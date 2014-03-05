@@ -4,7 +4,7 @@
 -export([master/2, replica/2, viewChange/2, recovery/2, handle_event/3, init/1, terminate/3]).
 -export([code_change/4,handle_info/3,handle_sync_event/4]).
 -behavior(gen_fsm).
-%-define(NODEBUG, true). %% comment out for debugging messages
+-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -46,7 +46,7 @@ master({commit, MasterViewNumber, _}, #{ viewNumber := ViewNumber } = State)
 
 master({clientRequest, Client, RequestNum, Op}, 
     #{ clientsTable := ClientsTable, allNodes := AllNodes, masterNode := MasterNode, 
-        viewNumber := ViewNumber, opNumber := OpNumber, 
+        viewNumber := ViewNumber, opNumber := OpNumber,  log := Log,
         uncommittedLog := UncommittedLog, timeout := Timeout,
         commitNumber := CommitNumber } = State) ->
     ?debugFmt("Got client request as master~n", []),
@@ -65,11 +65,12 @@ master({clientRequest, Client, RequestNum, Op},
             ?debugFmt("new request received~n", []),
             NewClientsTable = dict:store(Client, {RequestNum, inProgress}, ClientsTable),
             NewOpNumber = OpNumber + 1,
-            NewLog = [{NewOpNumber, Client, RequestNum, Op}|UncommittedLog],
+            NewUCLog = [{NewOpNumber, Op, Client, RequestNum}|UncommittedLog],
+            NewLog = [{NewOpNumber, Op, Client, RequestNum}|Log],
             sendToReplicas(MasterNode, AllNodes, 
                 {prepare, ViewNumber, Op, NewOpNumber, CommitNumber, Client, RequestNum}),
             {next_state, master, State#{ clientsTable := NewClientsTable, 
-                uncommittedLog := NewLog, opNumber := NewOpNumber }, Timeout }
+                uncommittedLog := NewUCLog, log := NewLog, opNumber := NewOpNumber }, Timeout }
     end;
 
 master({prepareOk, ViewNumber, _, _}, #{ viewNumber := MasterViewNumber,
@@ -122,7 +123,7 @@ master(UnknownMessage, #{ timeout := Timeout } = State) when UnknownMessage =/= 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
 doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn, 
     clientsTable := ClientsTable } = State) ->
-    {[{ON, C, RN, Op} = Entry], Rest} = lists:split(1, UncommittedLog),
+    {[{ON, Op, C, RN} = Entry], Rest} = lists:split(1, UncommittedLog),
     if
         (ON > From) and (ON =< To) ->
             ?debugFmt("committing ~p on master~n", [ON]),
@@ -214,6 +215,7 @@ viewChange({startViewChange, _, _} = VC, State) ->
 viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node}, 
     #{ doViewChanges := DoViewChanges, masterNode := MasterNode, myNode := MyNode,
         log := MyLog, opNumber := OpNumber, commitNumber := CommitNumber,
+        clientsTable := ClientsTable, commitFn := CommitFn,
         allNodes := AllNodes, timeout := Timeout, viewNumber := ViewNumber } = State)
     when (MasterNode == MyNode) and (ViewNumber =< NViewNumber) ->
     ?debugFmt("received doViewChange~n", []),
@@ -230,14 +232,8 @@ viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node},
                     {MaxLog, MaxOp, MaxCommit, MaxView} = 
                         findLargestLog(DoViewChanges, {MyLog, OpNumber, CommitNumber, ViewNumber}),
                     io:fwrite("Node ~p is now becoming master for view ~p~n", [MasterNode, MaxView]),
-                    if 
-                        CommitNumber < MaxCommit ->
-                            ?debugFmt("committing undone things~n", []),
-                            throw({notyetdonesorry});
-                        true ->
-                            ?debugFmt("no need to commit undone things, all up to date!~n", [])
-                    end,
                     sendToReplicas(MasterNode, AllNodes, {startView, MaxView, MaxLog, MaxOp, MaxCommit, MasterNode}),
+                    processUncommittedLogs(lists:sort(MaxLog), CommitNumber, MaxCommit, ClientsTable, master, CommitFn),
                     {next_state, master, State#{ doViewChanges := dict:new(), viewChanges := [],
                         timeout := 1000,
                         log := MaxLog, opNumber := MaxOp, commitNumber := MaxCommit, viewNumber := MaxView
@@ -249,18 +245,12 @@ viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node},
     end;
 
 viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From}, 
-    #{ masterNode := MasterNode, myNode := MyNode,
-        commitNumber := CommitNumber,
+    #{ masterNode := MasterNode, myNode := MyNode, commitFn := CommitFn,
+        commitNumber := CommitNumber, clientsTable := ClientsTable,
         timeout := _Timeout, viewNumber := ViewNumber } = State)
     when  (MasterNode == From) and (ViewNumber =< MaxView) ->
     ?debugFmt("got start view~n", []),
-    if 
-        CommitNumber < MaxCommit ->
-            ?debugFmt("committing undone things~n", []),
-            throw({notyetdonesorry});
-        true ->
-            ?debugFmt("no need to commit undone things, all up to date!~n", [])
-    end,
+    processUncommittedLogs(lists:sort(MaxLog), CommitNumber, MaxCommit, ClientsTable, replica, CommitFn),
     ?debugFmt("returning to normal operation as replica~n", []),
     io:fwrite("Node ~p to replica for master ~p and view ~p~n", [MyNode, MasterNode, MaxView]),
     {next_state, replica, State#{ viewNumber := MaxView, opNumber := MaxOp, 
@@ -279,25 +269,21 @@ viewChange(UnknownMessage, #{ timeout := Timeout} = State) ->
 
 recovery({recoveryResponse, ViewNumber, Nonce, Log, MaxOp, MaxCommit, MasterNode},
     #{ timeout := Timeout, nonce := MyNonce, myNode := MyNode, 
-    commitNumber := CommitNumber } = State)
+    commitNumber := CommitNumber, commitFn := CommitFn, clientsTable := ClientsTable } = State)
     when MyNonce == Nonce ->
     ?debugFmt("recovering (got correct nonce)~n", []),
-    if 
-        CommitNumber < MaxCommit ->
-            ?debugFmt("committing undone things~n", []),
-            throw({notyetdonesorry});
-        true ->
-            ?debugFmt("no need to commit undone things, all up to date!~n", [])
-    end,
-    io:fwrite("replica ~p recovered to view ~p~n", [MyNode, ViewNumber]),
-    {next_state, replica, State#{ viewNumber := ViewNumber, log := Log, 
+    processUncommittedLogs(lists:sort(Log), CommitNumber, MaxCommit, ClientsTable, replica, CommitFn),
+    NewPrepareBuffer = [{OpNumber, Op, Client, RequestNum} || 
+        {OpNumber, Op, Client, RequestNum} <- Log, OpNumber > MaxCommit],
+    io:fwrite("replica ~p recovered to view ~p up to commit ~p~n", [MyNode, ViewNumber, MaxCommit]),
+    {next_state, replica, State#{ prepareBuffer := NewPrepareBuffer, 
+        viewNumber := ViewNumber, log := Log, 
         opNumber := MaxOp, commitNumber := MaxCommit, masterNode := MasterNode}, 
         Timeout};
 
 recovery(UnknownMessage, #{ timeout := Timeout} = State) ->
     ?debugFmt("recovering replica got unknown/invalid message: ~p~n", [UnknownMessage]),
     {next_state, recovery, State, Timeout}.
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% HELPER FUNCTIONS (mostly for replica or view changing)
@@ -388,14 +374,20 @@ processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber,
             State;
         OpNumber =< MasterCommitNumber ->
             ?debugFmt("committing ~p on replica~n", [OpNumber]),
-            CommitFn(Client, Op, replica),
+            Result = case CommitFn(Client, Op, replica) of
+                {reply, Res} ->
+                    Res;
+                _ ->
+                    unknown
+            end,
+            NewClientsTable = dict:store(Client, {RequestNum, Result}, ClientsTable),
             processBuffer(State#{ commitNumber :=  OpNumber, 
-                prepareBuffer := Rest }, 
+                prepareBuffer := Rest, clientsTable := NewClientsTable }, 
                 Rest, MasterCommitNumber);
         OpNumber == GlobalOpNumber + 1 ->
             ?debugFmt("adding ~p to replica log~n", [OpNumber]),
             NewClientsTable = dict:store(Client, {RequestNum, inProgress}, ClientsTable),
-            NewLog = [{OpNumber, Client, RequestNum, Op}|Log],
+            NewLog = [{OpNumber, Op, Client, RequestNum}|Log],
             processBuffer(State#{ log := NewLog, opNumber := OpNumber, 
                 clientsTable := NewClientsTable }, Rest, MasterCommitNumber);
         true ->
@@ -407,6 +399,25 @@ startRecovery(#{myNode := MyNode, allNodes := AllNodes, timeout := Timeout} = St
     Nonce = now(),
     sendToReplicas(MyNode, AllNodes, {recovery, MyNode, Nonce}),
     {next_state, recovery, State#{nonce := Nonce}, Timeout}.
+
+processUncommittedLogs(_Log, MyCommitNumber, MaxCommit, ClientsTable, _NodeType, _CommitFn)
+    when MyCommitNumber >= MaxCommit -> ClientsTable;
+
+processUncommittedLogs(Log, MyCommitNumber, MaxCommit, ClientsTable, NodeType, CommitFn)
+    when MyCommitNumber < MaxCommit ->
+    [{OpNumber, Op, Client, RequestNum}|Rest] = Log,
+    Result = case {NodeType, CommitFn(Client, Op, NodeType)} of
+        {master, {reply, Res}} ->
+            sendToClient(Client, {RequestNum, Res}),
+            Res;
+        {replica, {reply, Res}} ->
+            Res;
+        _ ->
+            unknown
+    end,
+    NewClientsTable = dict:store(Client, {RequestNum, Result}, ClientsTable),
+    processUncommittedLogs(Rest, OpNumber, MaxCommit, NewClientsTable, NodeType, CommitFn).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Utility functions
@@ -460,13 +471,13 @@ handle_sync_event(_,_,_,_) ->
 
 testReceiveResult() ->
     receive
-        Result -> io:fwrite("~p~n", [Result])
+        Result -> io:fwrite("Client Result: ~p~n", [Result])
     after
         200 -> io:fwrite("timed out~n")
     end.
 
 testPrintCommit(Client, Op, NodeType) ->
-    io:fwrite("Committing ~p for ~p as ~p~n", [Op, Client, NodeType]),
+    io:fwrite("App Code -- Committing ~p for ~p as ~p~n", [Op, Client, NodeType]),
     % or doNotReply
     {reply, {done, Op}}.
 
@@ -518,17 +529,23 @@ testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},
     io:fwrite("done").
 
 testRecovery(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
-    io:fwrite("only starting nodes 1 and 2~n"),
+    io:fwrite("only starting nodes 1 and 2, then sending 2 requests~n"),
     Commit = fun testPrintCommit/3,
     Nodes = [Node1, Node2, Node3],
     rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
     rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
     startPrepare(Node1, self(), 1, hello1),
-    testReceiveResult(),
-    io:fwrite("bringing up node 3 now~n"),
-    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
     startPrepare(Node1, self(), 2, hello2),
     testReceiveResult(),
+    testReceiveResult(),
+    %io:fwrite("idling to get replicas to flush out~n"),
+    %waitBetweenTests(2100),
+    io:fwrite("bringing up node 3 now and sending 1 more request~n"),
+    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
+    startPrepare(Node1, self(), 3, hello3),
+    testReceiveResult(),
+    io:fwrite("idling to get replicas to flush out~n"),
+    waitBetweenTests(2100),
     rpc:call(N1, vr, stop, [Node1]),
     rpc:call(N2, vr, stop, [Node2]),
     rpc:call(N3, vr, stop, [Node3]),
