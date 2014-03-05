@@ -1,5 +1,5 @@
 -module(vr).
--export([startNode/4, startPrepare/4, stop/1]).
+-export([startNode/3, startPrepare/4, stop/1]).
 -export([test/1]).
 -export([master/2, replica/2, viewChange/2, handle_event/3, init/1, terminate/3]).
 -export([code_change/4, handle_info/3, handle_sync_event/4]).
@@ -11,8 +11,10 @@
 %% INTERFACE CODE -- use startNode and startPrepare
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-startNode(NodeName = {Name,_Node}, MasterNode, AllNodes, CommitFn) ->
-    S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => lists:sort(AllNodes), 
+startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
+    Nodes = lists:sort(AllNodes),
+    MasterNode = chooseMaster(#{ allNodes => Nodes}, 0),
+    S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => Nodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
         uncommittedLog => [], timeout => 1100, commitNumber => 0, viewChanges => [],
         prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName,
@@ -418,8 +420,8 @@ testPrintCommit(Client, Op, NodeType) ->
 testOldValue(Node1 = {_,N1},Node2 = {_,N2}) ->
     Commit = fun testPrintCommit/3,
     Nodes = [Node1,Node2],
-    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
-    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
     startPrepare(Node1, self(), 1, hello),
     testReceiveResult(),
     startPrepare(Node1, self(), 1, hello),
@@ -430,8 +432,8 @@ testOldValue(Node1 = {_,N1},Node2 = {_,N2}) ->
 testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
     Commit = fun testPrintCommit/3,
     Nodes = [Node1,Node2],
-    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
-    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
     startPrepare(Node1, self(), 1, hello1),
     testReceiveResult(),
     startPrepare(Node1, self(), 2, hello2),
@@ -442,9 +444,9 @@ testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
 testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     Commit = fun testPrintCommit/3,
     Nodes = [Node1, Node2, Node3],
-    rpc:call(N1, vr, startNode, [Node1, Node1, Nodes, Commit]),
-    rpc:call(N2, vr, startNode, [Node2, Node1, Nodes, Commit]),
-    rpc:call(N3, vr, startNode, [Node3, Node1, Nodes, Commit]),
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
+    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
     startPrepare(Node1, self(), 1, hello1),
     testReceiveResult(),
     rpc:call(N1, vr, stop, [Node1]),
@@ -473,12 +475,12 @@ test({remote, Node1, Node2, Node3}) ->
     runTest({vr, Node1}, {vr, Node2}, {vr, Node3}).
 
 runTest(Node1, Node2, Node3) ->
-    % io:fwrite("~n~n--- Testing old value send...~n"),
-    % testOldValue(Node1, Node2),
-    % waitBetweenTests(100),
-    % io:fwrite("~n~n--- Testing two commits...~n"),
-    % testTwoCommits(Node1, Node2),
-    % waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing old value send...~n"),
+    testOldValue(Node1, Node2),
+    waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing two commits...~n"),
+    testTwoCommits(Node1, Node2),
+    waitBetweenTests(100),
     io:fwrite("~n~n--- Testing master failover...~n"),
     testMasterFailover(Node1, Node2, Node3),
     waitBetweenTests(100),
