@@ -16,12 +16,12 @@ startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
     MasterNode = chooseMaster(#{ allNodes => Nodes}, 0),
     S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => Nodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
-        uncommittedLog => [], timeout => 1100, commitNumber => 0, viewChanges => [],
+        uncommittedLog => [], timeout => 4100, commitNumber => 0, viewChanges => [],
         prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName,
         doViewChanges => dict:new() },
     if 
         NodeName == MasterNode ->
-            gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 500 }}, []);
+            gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 1100 }}, []);
         true ->
             gen_fsm:start_link({local, Name}, vr, {replica, S}, [])
     end.
@@ -227,9 +227,9 @@ viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node},
                     end,
                     sendToReplicas(MasterNode, AllNodes, {startView, MaxView, MaxLog, MaxOp, MaxCommit, MasterNode}),
                     {next_state, master, State#{ doViewChanges := dict:new(), viewChanges := [],
-                        timeout := 500,
+                        timeout := 1000,
                         log := MaxLog, opNumber := MaxOp, commitNumber := MaxCommit, viewNumber := MaxView
-                     }, 500};
+                     }, 1000};
                 true ->
                     NewDoViewChanges = dict:store(Node, {NLog, NOpNumber, NCommitNumber, NViewNumber}, DoViewChanges),
                     {next_state, viewChange, State#{ doViewChanges := NewDoViewChanges }, Timeout}
@@ -253,8 +253,8 @@ viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From},
     io:fwrite("Node ~p to replica for master ~p and view ~p~n", [MyNode, MasterNode, MaxView]),
     {next_state, replica, State#{ viewNumber := MaxView, opNumber := MaxOp, 
         commitNumber := CommitNumber, log := MaxLog, doViewChanges := dict:new(), 
-        timeout := 1100,
-        viewChanges := [] }, 1100};
+        timeout := 4100,
+        viewChanges := [] }, 4100};
 
 viewChange(UnknownMessage, State) ->
     ?debugFmt("view changing replica got unknown/invalid message: ~p~n", [UnknownMessage]),
@@ -380,6 +380,7 @@ sendToReplicas(Master, Nodes, Message) ->
     lists:map(
         fun(Replica) ->
             ?debugFmt("sending ~p to replica ~p~n", [Message, Replica]),
+
             gen_fsm:send_event(Replica, Message)
         end,
         [Node || Node <- Nodes, Node =/= Master]).
@@ -443,22 +444,26 @@ testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
     rpc:call(N1, vr, stop, [Node1]),
     rpc:call(N2, vr, stop, [Node2]).
 
-testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
+testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},Node4 = {_, N4},Node5 = {_, N5}) ->
     Commit = fun testPrintCommit/3,
-    Nodes = [Node1, Node2, Node3],
+    Nodes = [Node1, Node2, Node3, Node4, Node5],
     rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
     rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
     rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
+    rpc:call(N4, vr, startNode, [Node4, Nodes, Commit]),
+    rpc:call(N5, vr, startNode, [Node5, Nodes, Commit]),
     startPrepare(Node1, self(), 1, hello1),
     testReceiveResult(),
     rpc:call(N1, vr, stop, [Node1]),
-    io:fwrite("now killed master, waiting 3 seconds...~n"),
-    waitBetweenTests(4500),
+    io:fwrite("now killed master, waiting 6 seconds...~n"),
+    waitBetweenTests(6000),
     io:fwrite("sending next operation"),
     startPrepare(Node2, self(), 2, hello2),
     testReceiveResult(),
     rpc:call(N2, vr, stop, [Node2]),
     rpc:call(N3, vr, stop, [Node3]),
+    rpc:call(N4, vr, stop, [Node4]),
+    rpc:call(N5, vr, stop, [Node5]),
     io:fwrite("done").
 
 waitBetweenTests(Time) ->
@@ -471,19 +476,22 @@ test(local) ->
     Node1 = {vr1,node()},
     Node2 = {vr2,node()},
     Node3 = {vr3,node()},
-    runTest(Node1, Node2, Node3);
+    Node4 = {vr4,node()},
+    Node5 = {vr5,node()},
+    
+    runTest(Node1, Node2, Node3, Node4, Node5);
 
-test({remote, Node1, Node2, Node3}) ->
-    runTest({vr, Node1}, {vr, Node2}, {vr, Node3}).
+test({remote, Node1, Node2, Node3, Node4, Node5}) ->
+    runTest({vr, Node1}, {vr, Node2}, {vr, Node3}, {vr, Node4}, {vr, Node5}).
 
-runTest(Node1, Node2, Node3) ->
-    io:fwrite("~n~n--- Testing old value send...~n"),
-    testOldValue(Node1, Node2),
-    waitBetweenTests(100),
-    io:fwrite("~n~n--- Testing two commits...~n"),
-    testTwoCommits(Node1, Node2),
-    waitBetweenTests(100),
+runTest(Node1, Node2, Node3, Node4, Node5) ->
+    % io:fwrite("~n~n--- Testing old value send...~n"),
+    % testOldValue(Node1, Node2),
+    % waitBetweenTests(100),
+    % io:fwrite("~n~n--- Testing two commits...~n"),
+    % testTwoCommits(Node1, Node2),
+    % waitBetweenTests(100),
     io:fwrite("~n~n--- Testing master failover...~n"),
-    testMasterFailover(Node1, Node2, Node3),
+    testMasterFailover(Node1, Node2, Node3, Node4, Node5),
     waitBetweenTests(100),
     io:fwrite("~n~n--- Tests complete ~n").
