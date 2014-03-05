@@ -28,6 +28,9 @@ To test Phat as a whole, launch a few nodes:
 Then on each node (starting with the master), start Phat:
 
     > phat:start_link([n1@localhost,n2@localhost,...]).
+    
+Then you can play around:
+
     > phat:test().
     > Response = server:clientRequest(0,{getroot}).
     
