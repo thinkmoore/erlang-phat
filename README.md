@@ -1,4 +1,3 @@
-
 Erlang Modules:
  * `vr.erl`: View-state replication
  * `fs.erl`: Filesystem core
@@ -18,9 +17,11 @@ Usage
         > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
 
         $ erl -sname n2@localhost
+        > net_adm:ping(n1@localhost).
         > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
         
         $ erl -sname n3@localhost
+        > net_adm:ping(n1@localhost).
         > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
         
 3. In a separate client shell, perform the following:
@@ -46,7 +47,7 @@ To test Phat as a whole, launch a few nodes:
     $ erl -sname n2@localhost
     $ erl -sname n3@localhost
 
-Then on each node (starting with the master), start Phat:
+Then on each node (starting with the master), start the Phat server:
 
     > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
     
