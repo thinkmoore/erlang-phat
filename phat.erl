@@ -16,11 +16,11 @@ start_link(Nodes) ->
     supervisor:start_link({local, phat}, phat, Nodes).
 
 inject_fault(fs) ->
-    gen_fsm:send_event(fs, {die});
+    gen_fsm:send_event(fs, {fault});
 inject_fault(ps) ->
-    gen_server:cast(ps, {die});
+    gen_server:cast(ps, {fault});
 inject_fault(vr) ->
-    gen_fsm:send_event(vr, {die}).
+    gen_fsm:send_event(vr, {fault}).
     
 stop() ->
     supervisor:terminate_child(phat, vr),
