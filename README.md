@@ -1,5 +1,3 @@
-erlang-phat
-===========
 
 Erlang Modules:
  * `vr.erl`: View-state replication
@@ -7,6 +5,29 @@ Erlang Modules:
  * `server.erl`: The Phat app server wrapper
  * `phat.erl`: The Phat supervisor, manages the above modules
 
+Usage
+----
+
+1. Compile the modules
+
+        $ erlc *.erl
+    
+2. Start 3 nodes in separate shells:
+    
+        $ erl -sname n1@localhost
+        > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
+
+        $ erl -sname n2@localhost
+        > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
+        
+        $ erl -sname n3@localhost
+        > phat:start_link([n1@localhost,n2@localhost,n3@localhost]).
+        
+3. In a separate client shell, perform the following:
+        
+        $ erl -sname client@localhost
+        > client:start_link(n1@localhost).
+        > client:call({getroot}).
 
 Testing 
 -------
@@ -33,11 +54,6 @@ Then you can play around on the Phat server side:
 
     > phat:test().
     > Response = server:clientRequest(0,{getroot}).
-
-You can also use the Phat client to abstract the Phat wrapper details:
-
-    > client:start_link(n1@localhost).
-    > client:call({getroot}).
 
 You can induce various types of failures using the `phat` module.
 `phat:inject_fault/1` takes as an argument a module to inject a fault into
