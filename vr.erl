@@ -364,7 +364,8 @@ processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber,
 %% Utility functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({NodeStatus, #{ timeout := Timeout } = State}) ->
+init({NodeStatus, #{ timeout := Timeout, masterNode := MasterNode, myNode := MyNode } = State}) ->
+    io:fwrite("VR Node ~p starting with master node ~p~n", [MyNode, MasterNode]),
     {ok, NodeStatus, State, Timeout}.
 
 sendToClient(Client, Message) ->
@@ -389,7 +390,8 @@ stop(NodeName) ->
 handle_event(stop, _, State) ->
     {stop, normal, State}.
 
-terminate(_, _, _) ->
+terminate(_, _, #{ myNode := MyNode, masterNode := MasterNode }) ->
+    io:fwrite("VR node ~p shutting down (master was ~p)~n", [MyNode, MasterNode]),
     ok.
 
 %% UNIMPLEMENTED
