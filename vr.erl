@@ -1,10 +1,10 @@
 -module(vr).
 -export([startNode/3, startPrepare/4, stop/1]).
 -export([test/1]).
--export([master/2, replica/2, viewChange/2, handle_event/3, init/1, terminate/3]).
+-export([master/2, replica/2, viewChange/2, recovery/2, handle_event/3, init/1, terminate/3]).
 -export([code_change/4,handle_info/3,handle_sync_event/4]).
 -behavior(gen_fsm).
--define(NODEBUG, true). %% comment out for debugging messages
+%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -18,7 +18,7 @@ startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
         uncommittedLog => [], timeout => 4100, commitNumber => 0, viewChanges => [],
         prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName,
-        doViewChanges => dict:new() },
+        doViewChanges => dict:new(), nonce => 0 },
     if 
         NodeName == MasterNode ->
             gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 1100 }}, []);
@@ -39,12 +39,10 @@ master(timeout, #{ allNodes := AllNodes, masterNode := MasterNode,
     sendToReplicas(MasterNode, AllNodes, {commit, ViewNumber, CommitNumber}),
     {next_state, master, State, Timeout};
 
-master({commit, MasterViewNumber, _}, #{ timeout := Timeout, 
-    viewNumber := ViewNumber} = State)
+master({commit, MasterViewNumber, _}, #{ viewNumber := ViewNumber } = State)
     when MasterViewNumber > ViewNumber ->
-    io:fwrite("Whoa there Nelly! MasterViewNumber: ~p ViewNumber ~p~n", [MasterViewNumber,ViewNumber]),
-    ?debugFmt("my view is out of date, need state transfer~n", []),
-    {next_state, stateTransfer, State, Timeout};
+    io:fwrite("In bad view MasterViewNumber: ~p ViewNumber ~p~n", [MasterViewNumber,ViewNumber]),
+    startRecovery(State);
 
 master({clientRequest, Client, RequestNum, Op}, 
     #{ clientsTable := ClientsTable, allNodes := AllNodes, masterNode := MasterNode, 
@@ -110,9 +108,16 @@ master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
             {next_state, master, State#{ masterBuffer := MB }, Timeout}
     end;
 
-master(UnknownMessage, State) when UnknownMessage =/= fault ->
+master({recovery, Node, Nonce}, #{ viewNumber := ViewNumber, log := Log, timeout := Timeout,
+    opNumber := OpNumber, commitNumber := CommitNumber, masterNode := MasterNode} = State) ->
+    ?debugFmt("got a recovery mesasge as master~n", []),
+    sendToReplica(Node, 
+        {recoveryResponse, ViewNumber, Nonce, Log, OpNumber, CommitNumber, MasterNode}),
+    {next_state, master, State, Timeout};
+
+master(UnknownMessage, #{ timeout := Timeout } = State) when UnknownMessage =/= fault ->
     ?debugFmt("master got unknown message: ~p~n", [UnknownMessage]),
-    {next_state, master, State}.
+    {next_state, master, State, Timeout}.
 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
 doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn, 
@@ -139,11 +144,10 @@ doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn,
 %% REPLICA CODE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-replica({commit, MasterViewNumber, _}, #{ timeout := Timeout, 
-    viewNumber := ViewNumber} = State)
+replica({commit, MasterViewNumber, _}, #{ viewNumber := ViewNumber} = State)
     when MasterViewNumber > ViewNumber ->
-    ?debugFmt("my view is out of date, need state transfer~n", []),
-    {next_state, stateTransfer, State, Timeout};
+    ?debugFmt("my view is out of date, need to recover~n", []),
+    startRecovery(State);
 
 replica({commit, MasterViewNumber, _}, #{ timeout := Timeout,
     viewNumber := ViewNumber} = State)
@@ -162,11 +166,10 @@ replica({clientRequest, Client, _, _}, #{ timeout := Timeout } = State) ->
     sendToClient(Client, {notMaster, MasterNode }),
     {next_state, replica, State, Timeout};
 
-replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ timeout := Timeout, 
-    viewNumber := ViewNumber} = State)
+replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ viewNumber := ViewNumber} = State)
     when MasterViewNumber > ViewNumber ->
-    ?debugFmt("my view is out of date, need state transfer~n", []),
-    {next_state, stateTransfer, State, Timeout};
+    ?debugFmt("my view is out of date, need to recover~n", []),
+    startRecovery(State);
 
 replica({prepare, MasterViewNumber, _, _, _, _, _}, #{ timeout := Timeout,
     viewNumber := ViewNumber} = State)
@@ -193,9 +196,17 @@ replica(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Node
 replica({startViewChange, _, _} = VC, State) ->
     handleStartViewChange(VC, State, replica);
 
+replica({revovery, _, _}, State) ->
+    ?debugFmt("got recovery message, but I am not master, ignoring~n", []),
+    {next_state, replica, State};
+
 replica(UnknownMessage, State) ->
     ?debugFmt("replica got unknown message: ~p~n", [UnknownMessage]),
     {next_state, replica, State}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% VIEW CHANGING CODE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 viewChange({startViewChange, _, _} = VC, State) ->
     handleStartViewChange(VC, State, viewChange);
@@ -257,9 +268,40 @@ viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From},
         timeout := 4100,
         viewChanges := [] }, 4100};
 
-viewChange(UnknownMessage, State) ->
+viewChange(UnknownMessage, #{ timeout := Timeout} = State) ->
     ?debugFmt("view changing replica got unknown/invalid message: ~p~n", [UnknownMessage]),
-    {next_state, viewChange, State}.
+    {next_state, viewChange, State, Timeout}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% RECOVERY CODE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+recovery({recoveryResponse, ViewNumber, Nonce, Log, MaxOp, MaxCommit, MasterNode},
+    #{ timeout := Timeout, nonce := MyNonce, myNode := MyNode, 
+    commitNumber := CommitNumber } = State)
+    when MyNonce == Nonce ->
+    ?debugFmt("recovering (got correct nonce)~n", []),
+    if 
+        CommitNumber < MaxCommit ->
+            ?debugFmt("committing undone things~n", []),
+            throw({notyetdonesorry});
+        true ->
+            ?debugFmt("no need to commit undone things, all up to date!~n", [])
+    end,
+    io:fwrite("replica ~p recovered to view ~p~n", [MyNode, ViewNumber]),
+    {next_state, replica, State#{ viewNumber := ViewNumber, log := Log, 
+        opNumber := MaxOp, commitNumber := MaxCommit, masterNode := MasterNode}, 
+        Timeout};
+
+recovery(UnknownMessage, #{ timeout := Timeout} = State) ->
+    ?debugFmt("recovering replica got unknown/invalid message: ~p~n", [UnknownMessage]),
+    {next_state, recovery, State, Timeout}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% HELPER FUNCTIONS (mostly for replica or view changing)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 findLargestLog(DoViewChanges, {_Log, _ON, _KN, _VN} = Init) ->
     dict:fold(fun(_, {CLog, CON, CKN, CVN}, {ALog, AON, AKN, AVN}) ->
@@ -326,14 +368,13 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
     if
         CommitNumber < MasterCommitNumber ->
             % todo send getstate
-            ?debugFmt("missed an op, need state transfer", []),
-            {next_state, stateTransfer, NewState, Timeout};
+            ?debugFmt("missed an op, need to recover", []),
+            startRecovery(State);
         true ->
             ?debugFmt("replica completed up to K=~p,O=~p~n", [CommitNumber, OpNumber]),
             sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode}),
             {next_state, replica, NewState, Timeout}
     end.
-
 
 processBuffer(State, [], _) -> State;
 processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber, 
@@ -361,6 +402,12 @@ processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber,
             processBuffer(State, Rest, MasterCommitNumber)
     end.
 
+startRecovery(#{myNode := MyNode, allNodes := AllNodes, timeout := Timeout} = State) ->
+    ?debugFmt("node ~p starting recovery~n", [MyNode]),
+    Nonce = now(),
+    sendToReplicas(MyNode, AllNodes, {recovery, MyNode, Nonce}),
+    {next_state, recovery, State#{nonce := Nonce}, Timeout}.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Utility functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -380,11 +427,13 @@ sendToMaster(Master, Message) ->
 sendToReplicas(Master, Nodes, Message) ->
     lists:map(
         fun(Replica) ->
-            ?debugFmt("sending ~p to replica ~p~n", [Message, Replica]),
-
-            gen_fsm:send_event(Replica, Message)
+            sendToReplica(Replica, Message)
         end,
         [Node || Node <- Nodes, Node =/= Master]).
+
+sendToReplica(Replica, Message) ->
+    ?debugFmt("sending ~p to replica ~p~n", [Message, Replica]),
+    gen_fsm:send_event(Replica, Message).
 
 stop(NodeName) ->
     gen_fsm:send_all_state_event(NodeName, stop).
@@ -445,7 +494,8 @@ testTwoCommits(Node1 = {_,N1},Node2 = {_,N2}) ->
     rpc:call(N1, vr, stop, [Node1]),
     rpc:call(N2, vr, stop, [Node2]).
 
-testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},Node4 = {_, N4},Node5 = {_, N5}) ->
+testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},
+    Node4 = {_, N4},Node5 = {_, N5}) ->
     Commit = fun testPrintCommit/3,
     Nodes = [Node1, Node2, Node3, Node4, Node5],
     rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
@@ -467,6 +517,23 @@ testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},Node4 = {_, N
     rpc:call(N5, vr, stop, [Node5]),
     io:fwrite("done").
 
+testRecovery(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
+    io:fwrite("only starting nodes 1 and 2~n"),
+    Commit = fun testPrintCommit/3,
+    Nodes = [Node1, Node2, Node3],
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
+    startPrepare(Node1, self(), 1, hello1),
+    testReceiveResult(),
+    io:fwrite("bringing up node 3 now~n"),
+    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
+    startPrepare(Node1, self(), 2, hello2),
+    testReceiveResult(),
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]),
+    rpc:call(N3, vr, stop, [Node3]),
+    io:fwrite("done").
+
 waitBetweenTests(Time) ->
     receive
     after
@@ -479,7 +546,6 @@ test(local) ->
     Node3 = {vr3,node()},
     Node4 = {vr4,node()},
     Node5 = {vr5,node()},
-    
     runTest(Node1, Node2, Node3, Node4, Node5);
 
 test({remote, Node1, Node2, Node3, Node4, Node5}) ->
@@ -492,7 +558,10 @@ runTest(Node1, Node2, Node3, Node4, Node5) ->
     % io:fwrite("~n~n--- Testing two commits...~n"),
     % testTwoCommits(Node1, Node2),
     % waitBetweenTests(100),
-    io:fwrite("~n~n--- Testing master failover...~n"),
-    testMasterFailover(Node1, Node2, Node3, Node4, Node5),
+    %io:fwrite("~n~n--- Testing master failover...~n"),
+    %testMasterFailover(Node1, Node2, Node3, Node4, Node5),
+    %waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing recovery...~n"),
+    testRecovery(Node1, Node2, Node3),
     waitBetweenTests(100),
     io:fwrite("~n~n--- Tests complete ~n").
