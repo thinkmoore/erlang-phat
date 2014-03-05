@@ -25,7 +25,7 @@ inject_fault(vr) ->
 stop() ->
     supervisor:terminate_child(phat, vr),
     supervisor:terminate_child(phat, ps),
-    supervisor:termiante_child(phat, fs).
+    supervisor:terminate_child(phat, fs).
 
 restart() ->
     supervisor:restart_child(phat, vr),
