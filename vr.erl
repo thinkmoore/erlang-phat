@@ -2,6 +2,7 @@
 -export([startNode/4, startPrepare/4, stop/1]).
 -export([test/1]).
 -export([master/2, replica/2, viewChange/2, handle_event/3, init/1, terminate/3]).
+-export([code_change/4,handle_info/3,handle_sync_event/4]).
 -behavior(gen_fsm).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -104,8 +105,8 @@ master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
             {next_state, master, State#{ masterBuffer := MB }, Timeout}
     end;
 
-master(UknownMessage, State) ->
-    io:fwrite("master got unknown message: ~p~n", [UknownMessage]),
+master(UnknownMessage, State) when UnknownMessage =/= fault ->
+    io:fwrite("master got unknown message: ~p~n", [UnknownMessage]),
     {next_state, master, State}.
 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
@@ -355,6 +356,7 @@ processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber,
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({NodeStatus, #{ timeout := Timeout } = State}) ->
+    io:fwrite("Starting vr layer on ~p~n", [node()]),
     {ok, NodeStatus, State, Timeout}.
 
 sendToClient(Client, Message) ->
@@ -379,8 +381,17 @@ stop(NodeName) ->
 handle_event(stop, _, State) ->
     {stop, normal, State}.
 
-terminate(_, _, _) ->
-    ok.
+code_change(_,_,_,_) ->
+    {error,code_change_unsupported}.
+
+handle_info(_,_,_) ->
+    {error,info_unsupported}.
+
+handle_sync_event(_,_,_,_) ->
+    {error,sync_event_unsupported}.
+
+terminate(Reason, _, _) ->
+    io:fwrite("VR layer terminating!~n~p~n", [Reason]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% TEST CODE
@@ -455,12 +466,12 @@ test({remote, Node1, Node2, Node3}) ->
     runTest({vr, Node1}, {vr, Node2}, {vr, Node3}).
 
 runTest(Node1, Node2, Node3) ->
-    % io:fwrite("~n~n--- Testing old value send...~n"),
-    % testOldValue(Node1, Node2),
-    % waitBetweenTests(100),
-    % io:fwrite("~n~n--- Testing two commits...~n"),
-    % testTwoCommits(Node1, Node2),
-    % waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing old value send...~n"),
+    testOldValue(Node1, Node2),
+    waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing two commits...~n"),
+    testTwoCommits(Node1, Node2),
+    waitBetweenTests(100),
     io:fwrite("~n~n--- Testing master failover...~n"),
     testMasterFailover(Node1, Node2, Node3),
     waitBetweenTests(100),

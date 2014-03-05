@@ -37,23 +37,24 @@ remove(Handle) ->
 start_link() ->
     gen_server:start_link({local, fs}, fs, [], []).
 init(_) ->
+    io:fwrite("Starting fileystem on ~p~n", [node()]),
     {ok,dict:store([],{dir, [], []},dict:new())}.
 
 %% Server teardown
 terminate(Reason,_) ->
-    io:fwrite("Terminating! ~p~n", [Reason]).
+    io:fwrite("Filesystem terminating!~n~p~n", [Reason]).
 stop() ->
     gen_server:cast(fs, stop).
 
 %% Unimplemented call backs
-code_change(_,_,_) ->
-    {error,code_change_unsupported}.
 handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_,_) ->
     {error,async_unsupported}.
+code_change(_,_,_) ->
+    {error,code_change_unsupported}.
 handle_info(_,_) ->
-    {error, info_unsupported}.
+    {error,info_unsupported}.
 
 %% Server call backs
 handle_call({getroot},_,State) ->
