@@ -42,6 +42,7 @@ master(timeout, #{ allNodes := AllNodes, masterNode := MasterNode,
 master({commit, MasterViewNumber, _}, #{ timeout := Timeout, 
     viewNumber := ViewNumber} = State)
     when MasterViewNumber > ViewNumber ->
+    io:fwrite("Whoa there Nelly! MasterViewNumber: ~p ViewNumber ~p~n", [MasterViewNumber,ViewNumber]),
     ?debugFmt("my view is out of date, need state transfer~n", []),
     {next_state, stateTransfer, State, Timeout};
 
@@ -79,7 +80,7 @@ master({prepareOk, ViewNumber, _, _}, #{ viewNumber := MasterViewNumber,
     ?debugFmt("ignoring prepareOk from old view", []), 
     {next_state, master, State, Timeout};
 
-master({prepareOk, _, OpNumber, ReplicaNode} = _Msg, 
+master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
     #{ masterBuffer := MasterBuffer, allNodes := AllNodes, timeout := Timeout,
         uncommittedLog := UncommittedLog, commitNumber := CommitNumber } = State) ->
     ?debugFmt("received prepareok ~p~n", [Msg]),
