@@ -6,7 +6,7 @@
 -export([start_link/0,init/1,terminate/2]).
 -export([code_change/3,handle_call/3,handle_cast/2,stop/0,handle_info/2]).
 -export([getroot/0,mkfile/3,open/2,getcontents/1,putcontents/2,readdir/1]).
--export([mkdir/2,stat/1,flock/2,funlock/1,remove/1]).
+-export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1]).
 
 %% Calls into the server
 getroot() ->
@@ -25,10 +25,12 @@ readdir(Handle) ->
     gen_server:call(fs,{readdir,Handle}).
 stat(Handle) ->
     gen_server:call(fs,{stat,Handle}).
-flock(Handle, LockType) ->
-    gen_server:call(fs,{flock,Handle, LockType}).
+flock(Handle, LockType, Timeout) ->
+    gen_server:call(fs,{flock,Handle,LockType,Timeout}).
 funlock(Handle) ->
     gen_server:call(fs,{funlock,Handle}).
+refreshlock(Handle,Timeout) ->
+    gen_server:call(fs,{refreshlock,Handle,Timeout}).
 remove(Handle) ->
     gen_server:call(fs,{remove,Handle}).
 
@@ -38,7 +40,7 @@ start_link() ->
     gen_server:start_link({local, fs}, fs, [], []).
 init(_) ->
     io:fwrite("Starting fileystem on ~p~n", [node()]),
-    {ok,dict:store([],{dir, [], []},dict:new())}.
+    {ok,dict:store([],{dir, #{read => {0, 0, {0,0,0}}, write => {0, unlocked}}, []},dict:new())}.
 
 %% Server teardown
 terminate(Reason,_) ->
@@ -76,11 +78,14 @@ handle_call({readdir,Handle},_,State) ->
     {reply,readdir(Handle,State),State};
 handle_call({stat,Handle},_,State) ->
     {reply,stat(Handle,State),State};
-handle_call({flock,Handle,LockType},_,State) ->
-    {Resp,NewState} = flock(Handle,LockType,State),
+handle_call({flock,Handle,LockType,Timeout},_,State) ->
+    {Resp,NewState} = flock(Handle,LockType,Timeout,State),
     {reply,Resp,NewState};
 handle_call({funlock,Handle},_,State) ->
     {Resp,NewState} = funlock(Handle,State),
+    {reply,Resp,NewState};
+handle_call({refreshlock,Handle,Timeout},_,State) ->
+    {Resp,NewState} = refreshlock(Handle,Timeout,State),
     {reply,Resp,NewState};
 handle_call({remove,Handle},_,State) ->
     {Resp,NewState} = remove(Handle,State),
@@ -89,7 +94,7 @@ handle_call({remove,Handle},_,State) ->
 %% State = { Map path := entry }  
 %% entry = { file, lock_status, data } | {dir, lock_status, entry list}
 %% path = reversed list of directories e.g. /dir1/dir2/filename = filename:dir2:dir1:[]
-%% Locks = {read={curReadSeqNum,numLocksStillHeld},write={curWriteSeqNum,locked/unlocked}}
+%% Locks = {read={SeqNum,Count,Expiration}, write={SeqNum,Expiration} | {SeqNum,unlocked}}
 %% Sequencer = {type=read/write,path=Path,sequenceNum=monotonically increasing counter}
 
 %% Functions that actually do stuff
@@ -115,9 +120,9 @@ mkfile({handle,Path},Subpath,Data,State) ->
 		{{dir,Locks,Children},WithDirs} ->
 		    NewState = dict:store(Dirs,{dir,Locks,[Name|Children]},WithDirs),
 		    Handle = {ok,{handle,[Name|Dirs]}},
-		    NewLocks = #{read => {0, 0}, write => {0, unlocked}},
+		    NewLocks = #{read => {0, 0, {0,0,0}}, write => {0, unlocked}},
 		    FinalState = dict:store([Name|Dirs], {file,NewLocks,Data}, NewState),
-		    ?debugFmt("mkfile final state: ~n~p~n", [NewState]),
+		    ?debugFmt("mkfile final state: ~n~p~n", [FinalState]),
 		    {Handle,FinalState};
 	      	Error -> 
 		    ?debugFmt("mkfile, error making dirs ~p~n", [Error]),
@@ -136,8 +141,9 @@ mkdirs([H|Dirs],State) ->
 		{error, Message} ->
 		    {error, Message};
 		{{dir,Locks,Children},NewState} ->
-		    NewDir = {dir,#{read => {0, []}, write => {0, unlocked}},[]},
-		    {NewDir,dict:store(Dirs,{dir,Locks,[H|Children]},NewState)}
+		    NewDir = {dir,#{read => {0, 0, {0,0,0}}, write => {0, unlocked}},[]},
+                    InParent = dict:store(Dirs,{dir,Locks,[H|Children]},NewState),
+		    {NewDir,dict:store([H|Dirs],NewDir,InParent)}
 	    end;				
 	{ok,{dir,Locks,Children}} -> 
 	    {{dir,Locks,Children},State};
@@ -151,7 +157,7 @@ mkdir({handle,Path},Subpath,State) ->
 	error ->
 	    case mkdirs(Dirs,State) of
 		{{dir,_,_},WithDirs} ->
-		    Handle = {ok,{handle,WithDirs}},
+		    Handle = {ok,{handle,Dirs}},
 		    ?debugFmt("mkdir final state: ~n~p~n", [WithDirs]),
 		    {Handle,WithDirs};
 		Error ->
@@ -203,57 +209,113 @@ stat({handle,Path},State) ->
 	    {error, file_or_dir_not_found}
     end.
 
-flock({handle,Path},LockType,State) ->
+addseconds({Mega,Sec,Micro},Seconds) ->
+    NewSeconds = Seconds + Sec,
+    if
+        NewSeconds > 1000000 ->
+            {Mega+1,NewSeconds - 1000000,Micro};
+        true ->
+            {Mega,NewSeconds, Micro}
+    end.
+
+flock({handle,Path},LockType,Timeout,State) ->
+    Now = now(),
     case dict:find(Path,State) of
 	error ->
 	    {{error, file_or_dir_not_found},State};
 	{ok, {Type, Locks, DataOrChildren}} ->
-	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
+	    #{read := {ReadSeq,NumRead,Expires}, write := {WriteSeq,WriteStatus}} = Locks,
+            NewExpires = addseconds(Now,Timeout),
 	    case {WriteStatus, LockType} of
-		{locked, _} ->
-		    ?debugFmt("ERROR flock with existing write: ~p~n~p~n", [Path,State]),
-		    {{error, already_write_locked},State};
 		{unlocked,read} ->
-		    NewLocks = Locks#{read := {ReadSeq,NumRead+1}},
+                    NewExpiration = max(Expires,NewExpires),
+                    NewSeq = if NumRead =:= 0 ->
+                                     ReadSeq + 1;
+                                true ->
+                                     ReadSeq
+                             end,
+		    NewLocks = Locks#{read := {NewSeq,NumRead+1,NewExpiration}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
-		    Sequencer = {read, {handle,Path}, ReadSeq},
+		    Sequencer = {read, {handle,Path}, NewSeq},
 		    ?debugFmt("flock read final state: ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};		
 		{unlocked,write} when NumRead =:= 0 ->
-		    NewLocks = Locks#{write := {WriteSeq,locked}},
+		    NewLocks = Locks#{write := {WriteSeq+1,NewExpires}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
-		    Sequencer = {write, {handle,Path}, WriteSeq},
+		    Sequencer = {write, {handle,Path}, WriteSeq+1},
 		    ?debugFmt("flock write final state ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};
-		{unlocked,write} -> 
-		    ?debugFmt("ERROR flock write with existing read: ~p~n~p~n", [Path,State]),
-		    {{error, already_read_locked},State}
+		{unlocked,write} ->
+                    if
+                        Expires < Now ->
+                            AfterExpiring = dict:store(Path,{Type,Locks#{read := {ReadSeq, 0, {0,0,0}}},DataOrChildren},State),
+                            flock({handle,Path},LockType,Timeout,AfterExpiring);
+                        true ->
+                            ?debugFmt("ERROR flock write with existing read: ~p~n~p~n", [Path,State]),
+                            {{error, already_read_locked},State}
+                    end;
+		{Expiration, _} ->
+                    if
+                        Expiration < Now ->
+                            AfterExpiring = dict:store(Path,{Type,Locks#{write := {WriteSeq,unlocked}},DataOrChildren},State),
+                            flock({handle,Path},LockType,Timeout,AfterExpiring);
+                        true ->
+                            ?debugFmt("ERROR flock with existing write: ~p~n~p~n", [Path,State]),
+                            {{error, already_write_locked},State}
+                    end
 	    end
     end.
+
+% refreshes a lock (even if its expired)
+refreshlock({handle,Path},Timeout,State) ->
+    case dict:find(Path,State) of
+	error ->
+	    {{error, file_or_dir_not_found},State};
+	{ok, {Type, Locks, DataOrChildren}} ->
+	    #{read := {ReadSeq,NumRead,Expiration}, write := {WriteSeq,WriteStatus}} = Locks,
+	    case WriteStatus of
+		unlocked when NumRead > 0 ->
+		    %% Read locked
+		    NewLocks = Locks#{read := {ReadSeq,NumRead,max(Expiration,addseconds(now(),Timeout))}},
+		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
+		    Sequencer = {read, {handle,Path}, ReadSeq},
+		    ?debugFmt("refresh final state: ~p~n~p~n", [Path,NewState]),
+		    {{ok, Sequencer}, NewState};
+		unlocked ->
+		    ?debugFmt("ERROR refresh not locked: ~p~n~p~n", [Path,State]),
+		    {{error, file_or_dir_not_locked},State};
+		Expires ->
+		    NewLocks = Locks#{write := {WriteSeq,max(Expires,addseconds(now(),Timeout))}},
+                    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
+		    Sequencer = {write, {handle,Path}, WriteSeq},
+		    ?debugFmt("refresh final state: ~p~n~p~n", [Path,NewState]),
+		    {{ok, Sequencer}, NewState}
+	    end
+    end.        
 
 funlock({handle,Path},State) ->
     case dict:find(Path,State) of
 	error ->
 	    {{error, file_or_dir_not_found},State};
 	{ok, {Type, Locks, DataOrChildren}} ->
-	    #{read := {ReadSeq,NumRead}, write := {WriteSeq,WriteStatus}} = Locks,
+	    #{read := {ReadSeq,NumRead,Expiration}, write := {WriteSeq,WriteStatus}} = Locks,
 	    case WriteStatus of
-		locked ->
-		    NewLocks = Locks#{write := {WriteSeq+1,unlocked}},
-                    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
-		    Sequencer = {write, {handle,Path}, WriteSeq+1},
-		    ?debugFmt("funlock final state: ~p~n~p~n", [Path,NewState]),
-		    {{ok, Sequencer}, NewState};
 		unlocked when NumRead > 0 ->
 		    %% Read locked
-		    NewLocks = Locks#{read := {ReadSeq+1,NumRead-1}},
+		    NewLocks = Locks#{read := {ReadSeq,NumRead-1,Expiration}},
 		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
-		    Sequencer = {read, {handle,Path}, ReadSeq+1},
+		    Sequencer = {read, {handle,Path}, ReadSeq},
 		    ?debugFmt("funlock final state: ~p~n~p~n", [Path,NewState]),
 		    {{ok, Sequencer}, NewState};
 		unlocked ->
 		    ?debugFmt("ERROR funlock not locked: ~p~n~p~n", [Path,State]),
-		    {{error, file_or_dir_not_locked},State}
+		    {{error, file_or_dir_not_locked},State};
+		_Expires ->
+		    NewLocks = Locks#{write := {WriteSeq,unlocked}},
+                    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
+		    Sequencer = {write, {handle,Path}, WriteSeq},
+		    ?debugFmt("funlock final state: ~p~n~p~n", [Path,NewState]),
+		    {{ok, Sequencer}, NewState}
 	    end
     end.
 
