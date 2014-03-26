@@ -17,9 +17,8 @@ rm -rf pipes0
 mkdir logs0
 mkdir pipes0
 run_erl -daemon pipes0/ logs0 "erl -sname n0@localhost -eval \"initialize_phat:init($1)\""
-sleep 0.1
 
-tail -f logs0/erlang.log.1
+sleep 1
 
 # to kill the processes after you are done use
 # killall beam.smp
