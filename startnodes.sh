@@ -20,3 +20,6 @@ run_erl -daemon pipes0/ logs0 "erl -sname n0@localhost -eval \"initialize_phat:i
 sleep 0.1
 
 tail -f logs0/erlang.log.1
+
+# to kill the processes after you are done use
+# killall beam.smp

@@ -11,7 +11,7 @@ init(_) ->
 
 commit(_, Op, NodeType) ->
     Ret = gen_server:call(fs,Op),
-    io:fwrite("Commited ~p as ~p on ~p~n", [Ret,NodeType,node()]),
+    io:fwrite("Commited ~p as ~p on ~p~n", [Op,NodeType,node()]),
     {reply, Ret}.
 
 handle_cast({clientRequest,From,Seq,Operation},State) ->
@@ -40,7 +40,21 @@ stop() ->
     gen_server:cast(stop).
 
 clientRequest(Seq,Operation) ->
-    gen_server:cast(ps,{clientRequest,self(),Seq,Operation}),
+    case Operation of 
+	{flock,Handle,LockType,Timeout} ->
+	    % check the time out in this nodes file system and dispatch based on the results
+	    % If this is not the master then the gen_server:cast will fail so we do not have to 
+	    % check master status here
+	    case gen_server:call(fs,{checktimeout,Handle,LockType}) of
+		forcelock ->
+		    NewOp = {forcelock,Handle,LockType,Timeout};
+		dontlock ->
+		    NewOp = {dontlock,Handle}
+	    end;
+	_ ->
+	    NewOp = Operation
+    end,
+    gen_server:cast(ps,{clientRequest,self(),Seq,NewOp}),
     receive
         Message -> Message
     after

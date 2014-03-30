@@ -6,7 +6,7 @@
 -export([start_link/0,init/1,terminate/2]).
 -export([code_change/3,handle_call/3,handle_cast/2,stop/0,handle_info/2]).
 -export([getroot/0,mkfile/3,open/2,getcontents/1,putcontents/2,readdir/1]).
--export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1]).
+-export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1,checktimeout/2,forcelock/3,dontlock/1]).
 
 %% Calls into the server
 getroot() ->
@@ -27,6 +27,12 @@ stat(Handle) ->
     gen_server:call(fs,{stat,Handle}).
 flock(Handle, LockType, Timeout) ->
     gen_server:call(fs,{flock,Handle,LockType,Timeout}).
+forcelock(Handle, LockType, Timeout) ->
+    gen_server:call(fs,{forcelock,Handle,LockType,Timeout}).
+dontlock(Handle) ->
+    gen_server:call(fs,{dontlock,Handle}).
+checktimeout(Handle, LockType) ->
+    gen_server:call(fs,{checktimeout,Handle, LockType}).
 funlock(Handle) ->
     gen_server:call(fs,{funlock,Handle}).
 refreshlock(Handle,Timeout) ->
@@ -81,6 +87,13 @@ handle_call({stat,Handle},_,State) ->
 handle_call({flock,Handle,LockType,Timeout},_,State) ->
     {Resp,NewState} = flock(Handle,LockType,Timeout,State),
     {reply,Resp,NewState};
+handle_call({forcelock,Handle,LockType,Timeout},_,State) ->
+    {Resp,NewState} = forcelock(Handle,LockType,Timeout,State),
+    {reply,Resp,NewState};
+handle_call({dontlock, Handle},_,State) ->
+    {reply, dontlock(Handle, State), State};
+handle_call({checktimeout,{handle,Path},LockType},_,State) ->
+    {reply, checktimeout({handle,Path},LockType,State), State};
 handle_call({funlock,Handle},_,State) ->
     {Resp,NewState} = funlock(Handle,State),
     {reply,Resp,NewState};
@@ -89,7 +102,10 @@ handle_call({refreshlock,Handle,Timeout},_,State) ->
     {reply,Resp,NewState};
 handle_call({remove,Handle},_,State) ->
     {Resp,NewState} = remove(Handle,State),
-    {reply,Resp,NewState}.
+    {reply,Resp,NewState};
+handle_call(OpName,_,State) ->
+    {reply, {error, {illegal_fs_operation, OpName}}, State}.
+
 
 %% State = { Map path := entry }  
 %% entry = { file, lock_status, data } | {dir, lock_status, entry list}
@@ -264,6 +280,78 @@ flock({handle,Path},LockType,Timeout,State) ->
                             {{error, already_write_locked},State}
                     end
 	    end
+    end.
+
+% Ignore the timeout and lock status and lock the file.
+% The lock status can be checked with lockstatus(Handle,State)
+forcelock({handle,Path},LockType,Timeout,State) ->
+    Now = now(),
+    case dict:find(Path,State) of
+	error ->
+	    {{error, file_or_dir_not_found},State};
+	{ok, {Type, Locks, DataOrChildren}} ->
+	    #{read := {ReadSeq,NumRead,Expires}, write := {WriteSeq,_}} = Locks,
+            NewExpires = addseconds(Now,Timeout),
+	    case LockType of
+		read ->
+                    NewExpiration = max(Expires,NewExpires),
+                    NewSeq = if NumRead =:= 0 ->
+                                     ReadSeq + 1;
+                                true ->
+                                     ReadSeq
+                             end,
+		    NewLocks = Locks#{read := {NewSeq,NumRead+1,NewExpiration}, write := {WriteSeq,unlocked}},
+		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
+		    Sequencer = {read, {handle,Path}, NewSeq},
+		    ?debugFmt("forcelock read final state: ~p~n~p~n", [Path,NewState]),
+		    {{ok, Sequencer}, NewState};		
+		write ->
+		    NewLocks = Locks#{read := {ReadSeq,0,{0,0,0}}, write := {WriteSeq+1,NewExpires}},
+		    NewState = dict:store(Path,{Type,NewLocks,DataOrChildren},State),
+		    Sequencer = {write, {handle,Path}, WriteSeq+1},
+		    ?debugFmt("forcelock write final state ~p~n~p~n", [Path,NewState]),
+		    {{ok, Sequencer}, NewState}
+	    end
+    end.
+
+% Get the status of the lock
+checktimeout({handle,Path},LockType,State) ->
+    Now = now(),
+    case dict:find(Path,State) of
+	error ->
+	    dontlock;
+	{ok, {_, Locks, _}} ->
+	    #{read := {_,NumRead,Expires}, write := {_,WriteStatus}} = Locks,
+	    case {WriteStatus, LockType} of
+		{unlocked,read} -> % no write lock, ok to acquire read lock
+		    forcelock;
+		{unlocked,write} when NumRead =:= 0 -> % no locks
+		    forcelock;
+		{unlocked,write} -> % requesting a write lock but there is a read lock so check expiration
+		    if
+                        Expires < Now ->
+                            forcelock;
+                        true ->
+                            dontlock
+                    end;
+		{Expiration, _} -> % write locked, check the expiration
+                    if
+                        Expiration < Now ->
+                            forcelock;
+                        true ->
+                            dontlock
+			end
+	    end
+    end.
+
+% Note that the lock was unsuccessful (due to check that occurred in the Master)
+% This is here to make sure the client gets a reply and that this reply makes it into VR
+dontlock({handle,Path}, State) ->
+    case dict:find(Path,State) of
+	error ->
+	    {error, file_or_dir_not_found};
+	{ok, {_, _, _}} ->
+	    {error, already_locked}
     end.
 
 % refreshes a lock (even if its expired)

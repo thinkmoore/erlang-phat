@@ -1,6 +1,6 @@
 -module(testfs).
 
--export([test1/0,testLock/0,testTimeout/0,testRefresh/0,getLock/2]).
+-export([test1/0,testLock/0,testTimeout/0,testRefresh/0,getLock/2,testClient/0]).
 
 test1() ->
     fs:stop(),
@@ -77,3 +77,15 @@ testRefresh() ->
             io:fwrite("hung~n")
     end,
     fs:stop().
+
+testClient() ->
+    client:start(),
+    Root = client:call({getroot}),
+    H = client:call({mkfile,Root,["bar","baz","quux"],"!!!"}),
+    io:fwrite("mkfile result: ~p~n", [H]),
+    S = client:call({flock,H,write,2}),
+    io:fwrite("flock result: ~p~n", [S]),
+    S2 = client:call({flock,H,write,2}),
+    io:fwrite("flock result: ~p~n", [S2]),
+    client:call({remove,H}).
+    

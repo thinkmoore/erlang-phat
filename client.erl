@@ -2,9 +2,12 @@
 -behavior(gen_server).
 %%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,init/1,handle_call/3,call/1]).
+-export([start_link/1,init/1,handle_call/3,call/1,start/0]).
 
 %% State is {master => MasterNode, seq => SequenceNumber}
+
+start() ->
+    start_link(n1@localhost).
 
 start_link(Master) ->
     gen_server:start_link({local,client},client,[Master],[]).
