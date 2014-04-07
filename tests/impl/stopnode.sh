@@ -35,5 +35,6 @@ main (_) ->
   rpc:block_call(n${i}@localhost,phat,stop,[]).
 EOF
     escript $TEMPFILE
+    echo "killed n${i}@localhost"
     rm -f $TEMPFILE
 fi
