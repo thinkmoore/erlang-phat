@@ -42,9 +42,14 @@ main (_) ->
   client:call({mkfile, {handle,[]}, [file$VR_FILE], "$VR_FILE" }).
 EOF
     escript $TEMPFILE >> $WORKAREA/command-logs
+    EXITCODE=$?
     echo "createfile $VR_FILE" >> $WORKAREA/do-log
     echo "$VR_FILE" > $WORKAREA/reference-filesystem/$VR_FILE
     echo "client:call({mkfile, {handle,[]}, [file$VR_FILE], \"$VR_FILE\"})"
+    if [ $EXITCODE -ne 0 ]
+    then
+        echo "  previous call failed, exit code was $EXITCODE"
+    fi
 fi
 
 # end possible commands
