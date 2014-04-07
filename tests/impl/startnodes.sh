@@ -1,3 +1,5 @@
+#!/bin/bash
+
 N=$1
 WORKAREA=$2
 SEED=$3

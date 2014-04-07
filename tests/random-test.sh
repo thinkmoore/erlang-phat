@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # arguments
 
 N=$1
