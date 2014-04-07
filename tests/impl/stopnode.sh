@@ -22,7 +22,6 @@ else
     R=$RANDOM
     i=`expr $R % $N + 1`
     echo "$i" >> $WORKAREA/stoppednodes
-    echo "about to kill n${i}@localhost"
     TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
     if [ 0 -ne $? ]; then
         echoerr "Could not create a temporary file, cannot complete"

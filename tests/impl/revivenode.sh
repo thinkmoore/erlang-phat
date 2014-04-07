@@ -21,7 +21,6 @@ if [ "$i" = "primary" ]; then
     echo "reviving primary is unimplemented"
     exit 1;
 else
-    echo "about to revive n${i}@localhost"
     TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXXX)
     if [ 0 -ne $? ]; then
         echoerr "Could not create a temporary file, cannot complete"
