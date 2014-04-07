@@ -20,15 +20,15 @@ function timer_total() {
         CHILD_SEED=$RANDOM
         if [ $R -le 10000 ];
         then
-            sh ${IMPL}/do.sh createfile 5 $N $WORKAREA $CHILD_SEED &
-        elif [ $R -le 15000 ];
+            bash ${IMPL}/do.sh createfile 5 $N $WORKAREA $CHILD_SEED &
+        elif [ $R -le 15000 -a "`wc -l $WORKAREA/stoppednodes | awk {'print $1'}`" -le $F ];
         then
-            sh ${IMPL}/stopnode.sh replica $N $WORKAREA $CHILD_SEED &
+            bash ${IMPL}/stopnode.sh replica $N $WORKAREA $CHILD_SEED &
         elif [ $R -le 20000 -a -s $WORKAREA/stoppednodes ];
         then
-            sh ${IMPL}/revivenode.sh $N $WORKAREA $SEED &
+            bash ${IMPL}/revivenode.sh $N $WORKAREA $SEED &
         else
-            sh ${IMPL}/do.sh createfile 10 $N $WORKAREA $CHILD_SEED &
+            bash ${IMPL}/do.sh createfile 10 $N $WORKAREA $CHILD_SEED &
         fi
     done
 }
@@ -37,15 +37,15 @@ function timer_total() {
 
 RANDOM=$SEED
 
-sh ${IMPL}/initialize.sh $WORKAREA
-sh ${IMPL}/startnodes.sh $N $WORKAREA
+bash ${IMPL}/initialize.sh $WORKAREA
+bash ${IMPL}/startnodes.sh $N $WORKAREA
 time timer_total
 
-sleep 1
+sleep 10
 echo "Verification..."
 
 if [ -z $VERIFYLOG ]; then
-    sh ${IMPL}/verify.sh $N $WORKAREA
+    bash ${IMPL}/verify.sh $N $WORKAREA
 else
-    sh ${IMPL}/verify.sh $N $WORKAREA > $VERIFYLOG
+    bash ${IMPL}/verify.sh $N $WORKAREA > $VERIFYLOG
 fi
