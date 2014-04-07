@@ -24,7 +24,7 @@ else
     fi
     cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
-%%! -sname connector@localhost
+%%! -sname connector${RANDOM}@localhost
 main (_) ->
   rpc:block_call(n${i}@localhost,phat,stop,[]).
 EOF
