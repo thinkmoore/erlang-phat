@@ -29,9 +29,12 @@ if [ "$COMMAND" = "createfile" ]; then
     VR_FILE=`echo $TEMPFILE | sed 's:[/.]:_:g'`
     # loop over the possible nodes trying to guess the master
     NOT_YET_DEAD_NODE=1
-    while [[ ( $NOT_YET_DEAD_NODE -le $N ) && \
-        `grep -q '^$NOT_YET_DEAD_NODE$' $WORKAREA/stoppednodes` -ne 0 ]]
+    grep -q "^${NOT_YET_DEAD_NODE}\$" $WORKAREA/stoppednodes
+    RESULT=$?
+    while [[ $NOT_YET_DEAD_NODE -lt $N && $RESULT -eq 0 ]]
     do
+        grep -q "^${NOT_YET_DEAD_NODE}\$" $WORKAREA/stoppednodes
+        RESULT=$?
         NOT_YET_DEAD_NODE=`expr $NOT_YET_DEAD_NODE + 1`
     done
     cat > $TEMPFILE <<EOF
