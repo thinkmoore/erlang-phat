@@ -1,6 +1,6 @@
 -module(client).
 -behavior(gen_server).
--define(NODEBUG, true). %% comment out for debugging messages
+%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,init/1,handle_call/3,call/1,start/0]).
 
@@ -28,11 +28,11 @@ nextMaster(Master,[],Alternates) ->
 handle_call(Operation,Caller,State) ->
     #{seq := SeqNum, master := Master, alternates := Alternates} = State,
     Client = self(),
-    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation]),
+    Response = rpc:block_call(Master, server, clientRequest, [SeqNum,Operation], 4000),
     case Response of
         timeout ->
-	    ?debugMsg("Timeout, trying again with next alternate~n"),
 	    NewMaster = nextMaster(Master,Alternates,Alternates),
+	    ?debugFmt("Timeout, trying again with next alternate ~p~n", [NewMaster]),
 	    handle_call(Operation, Caller, State#{master := NewMaster});
 	{Number,{ok,Result}} -> 
 	    if 
