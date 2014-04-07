@@ -1,12 +1,14 @@
 #!/bin/bash
 # arguments
 
-N=$1
+F=$1
 SEED=$2
 RUNS=$3
 IMPL=$4
 WORKAREA=$5
 VERIFYLOG=$6
+
+N=$((F * 2 + 1))
 
 # functions
 
