@@ -1,5 +1,10 @@
 N=$1
 WORKAREA=$2
+SEED=$3
+
+if [ -n $SEED ]; then
+    RANDOM=$SEED
+fi
 
 # start the master and slaves
 for i in `seq 1 $N`;

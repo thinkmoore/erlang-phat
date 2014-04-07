@@ -6,8 +6,12 @@ echoerr() { echo "$@" 1>&2; }
 
 N=$1
 WORKAREA=$2
+SEED=$3
 
 # executable portion
+if [ -n $SEED ]; then
+    RANDOM=$SEED
+fi
 
 read i <$WORKAREA/stoppednodes
 # remove the above line from the file

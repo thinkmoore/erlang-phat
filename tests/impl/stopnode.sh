@@ -7,6 +7,11 @@ echoerr() { echo "$@" 1>&2; }
 TYPE=$1
 N=$2
 WORKAREA=$3
+SEED=$4
+
+if [ -n $SEED ]; then
+    RANDOM=$SEED
+fi
 
 # executable portion
 
@@ -14,7 +19,8 @@ if [ "$TYPE" = "primary" ]; then
     echo "Killing primary is unimplemented"
     exit 1;
 else
-    i=`expr $RANDOM % $N + 1`
+    R=$RANDOM
+    i=`expr $R % $N + 1`
     echo "$i" >> $WORKAREA/stoppednodes
     echo "about to kill n${i}@localhost"
     TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
