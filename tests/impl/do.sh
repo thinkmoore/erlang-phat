@@ -52,6 +52,7 @@ EOF
     if [ $EXITCODE -ne 0 ]
     then
         echo "  previous call failed, exit code was $EXITCODE"
+        echo "  tried talking to n${NOT_YET_DEAD_NODE}@localhost"
     fi
 fi
 
