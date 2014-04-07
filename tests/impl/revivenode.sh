@@ -2,18 +2,23 @@
 
 echoerr() { echo "$@" 1>&2; }
 
+# arguments
+
+N=$1
+WORKAREA=$2
+
 # executable portion
 
-read i <stoppednodes
-sed -e '1,1d' -i.bak stoppednodes
+read i <$WORKAREA/stoppednodes
+# remove the above line from the file
+sed -e '1,1d' -i.bak $WORKAREA/stoppednodes
 
 if [ "$i" = "primary" ]; then
     echo "reviving primary is unimplemented"
     exit 1;
 else
     echo "about to revive n${i}@localhost"
-    # erl -sname "controller@localhost" -eval "rpc:block_call(n${i}@localhost,phat,stop,[])"
-    TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXX)
+    TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXXX)
     if [ 0 -ne $? ]; then
         echoerr "Could not create a temporary file, cannot complete"
         exit 1
@@ -26,5 +31,4 @@ main (_) ->
 EOF
     escript $TEMPFILE
     rm -f $TEMPFILE
-    echo "done"
 fi

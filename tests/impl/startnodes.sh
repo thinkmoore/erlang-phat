@@ -1,22 +1,25 @@
+N=$1
+WORKAREA=$2
+
 # start the master and slaves
-for i in `seq 1 $1`;
+for i in `seq 1 $N`;
 do
-    rm -rf pipes$i
-    rm -rf logs$i
-    mkdir pipes$i
-    mkdir logs$i
+    rm -rf $WORKAREA/pipes$i
+    rm -rf $WORKAREA/logs$i
+    mkdir $WORKAREA/pipes$i
+    mkdir $WORKAREA/logs$i
     echo "starting n${i}@localhost"
-    run_erl -daemon pipes$i/ logs$i "erl -sname n${i}@localhost" &
+    run_erl -daemon $WORKAREA/pipes$i/ $WORKAREA/logs$i "erl -sname n${i}@localhost" &
 done
 
 echo "initializing the cluster"
 # this guy just tells everyone to turn on and acts as a central log server, if
 # he dies the cluster should be unaffected (aside from maybe broken pipes?).
-rm -rf logs0
-rm -rf pipes0
-mkdir logs0
-mkdir pipes0
-run_erl -daemon pipes0/ logs0 "erl -sname n0@localhost -eval \"initialize_phat:init($1)\""
+rm -rf $WORKAREA/logs0
+rm -rf $WORKAREA/pipes0
+mkdir $WORKAREA/logs0
+mkdir $WORKAREA/pipes0
+run_erl -daemon $WORKAREA/pipes0/ $WORKAREA/logs0 "erl -sname n0@localhost -eval \"initialize_phat:init($N)\""
 
 sleep 1
 

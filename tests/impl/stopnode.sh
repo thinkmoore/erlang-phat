@@ -2,18 +2,22 @@
 
 echoerr() { echo "$@" 1>&2; }
 
+# arguments
+
+TYPE=$1
+N=$2
+WORKAREA=$3
+
 # executable portion
 
-N=$2
-
-if [ "$1" = "primary" ]; then
+if [ "$TYPE" = "primary" ]; then
     echo "Killing primary is unimplemented"
     exit 1;
 else
     i=`expr $RANDOM % $N + 1`
-    echo "$i" >> stoppednodes
+    echo "$i" >> $WORKAREA/stoppednodes
     echo "about to kill n${i}@localhost"
-    TEMPFILE=$(mktemp /tmp/phat_escript.XXXXX)
+    TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
     if [ 0 -ne $? ]; then
         echoerr "Could not create a temporary file, cannot complete"
         exit 1
