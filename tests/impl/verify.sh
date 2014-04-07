@@ -32,7 +32,7 @@ do
 #!/usr/bin/env escript
 %%! -sname verify_${RANDOM}@localhost
 main (_) ->
-  client:start_link(n${NOT_YET_DEAD_NODE}@localhost),
+  client:start_link([n${NOT_YET_DEAD_NODE}@localhost]),
   PhatContents = client:call({getcontents, {handle,[$VR_FILE]}}),
   ActualContents = "$CONTENTS",
   case PhatContents of

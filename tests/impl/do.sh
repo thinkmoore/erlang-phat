@@ -38,7 +38,7 @@ if [ "$COMMAND" = "createfile" ]; then
 #!/usr/bin/env escript
 %%! -sname client_$VR_FILE@localhost
 main (_) ->
-  client:start_link(n${NOT_YET_DEAD_NODE}@localhost),
+  client:start_link([n${NOT_YET_DEAD_NODE}@localhost]),
   client:call({mkfile, {handle,[]}, [file$VR_FILE], "$VR_FILE" }).
 EOF
     escript $TEMPFILE >> $WORKAREA/command-logs
