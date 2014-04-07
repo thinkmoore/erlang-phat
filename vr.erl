@@ -16,7 +16,12 @@ startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
     MasterNode = chooseMaster(#{ allNodes => Nodes}, 0),
     S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => Nodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
-        uncommittedLog => [], timeout => 4100, commitNumber => 0, viewChanges => [],
+        uncommittedLog => [], timeout => 4100, commitNumber => 0, 
+
+        % (complicated data structure invariant so it gets a comment:)
+        % Dictionary of view number to list of startViewChanges (unique to sending node)
+        viewChanges => dict:new(),
+        
         prepareBuffer => [], masterBuffer => dict:new(), myNode => NodeName,
         doViewChanges => dict:new(), nonce => 0 },
     if 
@@ -192,7 +197,7 @@ replica(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Node
     io:fwrite("replica ~p timed out from master, initating view change for view ~p~n", [MyNode, ViewNumber]),
     sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
     {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode, 
-        masterNode := NewMaster, viewChanges := [MyNode] }, Timeout };
+        masterNode := NewMaster }, Timeout };
 
 replica({startViewChange, _, _} = VC, State) ->
     handleStartViewChange(VC, State, replica);
@@ -234,7 +239,7 @@ viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node},
                     io:fwrite("Node ~p is now becoming master for view ~p~n", [MasterNode, MaxView]),
                     sendToReplicas(MasterNode, AllNodes, {startView, MaxView, MaxLog, MaxOp, MaxCommit, MasterNode}),
                     processUncommittedLogs(lists:sort(MaxLog), CommitNumber, MaxCommit, ClientsTable, master, CommitFn),
-                    {next_state, master, State#{ doViewChanges := dict:new(), viewChanges := [],
+                    {next_state, master, State#{ doViewChanges := dict:new(),
                         timeout := 1000,
                         log := MaxLog, opNumber := MaxOp, commitNumber := MaxCommit, viewNumber := MaxView
                      }, 1000};
@@ -255,8 +260,7 @@ viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From},
     io:fwrite("Node ~p to replica for master ~p and view ~p~n", [MyNode, MasterNode, MaxView]),
     {next_state, replica, State#{ viewNumber := MaxView, opNumber := MaxOp, 
         commitNumber := CommitNumber, log := MaxLog, doViewChanges := dict:new(), 
-        timeout := 4100,
-        viewChanges := [] }, 4100};
+        timeout := 4100 }, 4100};
 
 viewChange(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Nodes, 
     timeout := Timeout, masterNode := MasterNode } = State) ->
@@ -266,7 +270,7 @@ viewChange(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := N
     io:fwrite("replica ~p timed out from master, initating view change for view ~p~n", [MyNode, ViewNumber]),
     sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
     {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode, 
-        masterNode := NewMaster, viewChanges := [MyNode] }, Timeout };
+        masterNode := NewMaster}, Timeout };
 
 viewChange(UnknownMessage, #{ timeout := Timeout} = State) ->
     ?debugFmt("view changing replica got unknown/invalid message: ~p~n", [UnknownMessage]),
@@ -299,6 +303,32 @@ recovery(UnknownMessage, #{ timeout := Timeout} = State) ->
 %% HELPER FUNCTIONS (mostly for replica or view changing)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+addViewChangeRequest(NewViewNumber, Node, #{ viewNumber := MyViewNumber, 
+    myNode := MyNode, allNodes := AllNodes, viewChanges := ViewChanges }) 
+    when NewViewNumber >= MyViewNumber ->
+    F = (length(AllNodes) - 1) / 2,
+    ?debugFmt("~p processing view change for ~p by ~p ", [MyNode, NewViewNumber, Node]),
+    case dict:find(NewViewNumber, ViewChanges) of
+        {ok, Nodes} ->
+            IsMember = lists:member(Node, Nodes),
+            if
+                IsMember -> 
+                    {false, ViewChanges};
+                (length(Nodes) + 1) > F ->
+                    {true, dict:store(NewViewNumber, [Node|Nodes], ViewChanges)};
+                true ->
+                    ?debugFmt("i only see ~p view changes, need more than ~p ~n", [length(Nodes) + 1, F]),
+                    {false, dict:store(NewViewNumber, [Node|Nodes], ViewChanges) }
+            end;
+        _ -> 
+            {false, dict:store(NewViewNumber, [Node], ViewChanges)}
+    end;
+
+addViewChangeRequest(NewViewNumber, Node, #{ viewNumber := MyViewNumber, viewChanges := ViewChanges }) 
+    when NewViewNumber < MyViewNumber ->
+    ?debugFmt("Ignoring old startViewChange~n", []),
+    {false, ViewChanges}.
+
 findLargestLog(DoViewChanges, {_Log, _ON, _KN, _VN} = Init) ->
     dict:fold(fun(_, {CLog, CON, CKN, CVN}, {ALog, AON, AKN, AVN}) ->
         if
@@ -314,40 +344,25 @@ findLargestLog(DoViewChanges, {_Log, _ON, _KN, _VN} = Init) ->
 chooseMaster(#{ allNodes := AllNodes }, ViewNumber) ->
     lists:nth((ViewNumber rem length(AllNodes)) + 1, AllNodes).
 
-%%% XXX: This is pretty inefficient, instead should keep being a replica,
-%%% because one timedout replica will force an entire view change
 handleStartViewChange({startViewChange, NewViewNumber, Node} = VC, 
     #{ viewNumber := ViewNumber, myNode := MyNode, 
-    allNodes := Nodes } = State, OldState)
-    when ViewNumber < NewViewNumber ->
-    OldView = NewViewNumber - 1,
-    OldMaster = chooseMaster(State, OldView),
-    NewMaster = chooseMaster(State, NewViewNumber),
-    ?debugFmt("Starting view change because I see a view change. ", []),
-    ?debugFmt("I think new master is now ~p~n", [NewMaster]),
-    
-    sendToReplicas(OldMaster, Nodes, {startViewChange, NewViewNumber, MyNode}),
-    
-    handleStartViewChange(VC, State#{ viewNumber := NewViewNumber, 
-        viewChanges := [Node], masterNode := chooseMaster(State, NewViewNumber) }, OldState);
-
-handleStartViewChange({startViewChange, NewViewNumber, Node}, 
-    #{ viewNumber := ViewNumber, myNode := MyNode, timeout := Timeout,  allNodes := AllNodes,
-    commitNumber := CommitNumber, opNumber := OpNumber, log := Log,
-    viewChanges := ViewChanges, masterNode := MasterNode } = State, _OldState)
-    when ViewNumber == NewViewNumber ->
-    ?debugFmt("~p is processing startViewChange for ~p ~n", [MyNode, Node]),
-    F = (length(AllNodes) - 1) / 2,
-    IsMember = lists:member(Node, ViewChanges),
-    if
-        IsMember -> 
-            {next_state, viewChange, State, Timeout};
-        (length(ViewChanges) + 1) > F ->
-            sendToMaster(MasterNode, {doViewChange, ViewNumber, Log, OpNumber, CommitNumber, MyNode}),
-            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }, Timeout};
-        true ->
-            ?debugFmt("i only see ~p view changes, need more than ~p ~n", [length(ViewChanges) + 1, F]),
-            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }, Timeout}
+    allNodes := Nodes, timeout := Timeout,
+    commitNumber := CommitNumber, log := Log, opNumber := OpNumber } = State, OldState)
+    when ViewNumber =< NewViewNumber ->
+    case addViewChangeRequest(NewViewNumber, Node, State) of
+        {true, NewViewChanges} ->
+            ?debugFmt("Starting view change because I have seen F+1 view changes. ", []),
+            OldView = NewViewNumber - 1,
+            OldMaster = chooseMaster(State, OldView),
+            NewMaster = chooseMaster(State, NewViewNumber),
+            ?debugFmt("I think new master is now ~p~n", [NewMaster]),
+            sendToReplicas(OldMaster, Nodes, {startViewChange, NewViewNumber, MyNode}),
+            sendToMaster(NewMaster, {doViewChange, ViewNumber, Log, OpNumber, CommitNumber, MyNode}),
+            {next_state, viewChange, State#{ viewNumber:= NewViewNumber, viewChanges := NewViewChanges,
+                masterNode := NewMaster }, Timeout};
+        {false, NewViewChanges} ->
+            ?debugFmt("I have not seen enough startViewChanges yet; not changing state", []),
+            {next_state, OldState, State#{ viewChanges := NewViewChanges}, Timeout}
     end;
 
 handleStartViewChange({startViewChange, NewViewNumber, _Node}, 
