@@ -34,5 +34,6 @@ main (_) ->
   rpc:block_call(n${i}@localhost,phat,restart,[]).
 EOF
     escript $TEMPFILE
+    echo "revived n${i}@localhost"
     rm -f $TEMPFILE
 fi
