@@ -30,5 +30,4 @@ main (_) ->
 EOF
     escript $TEMPFILE
     rm -f $TEMPFILE
-    echo "done"
 fi
