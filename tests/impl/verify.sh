@@ -11,6 +11,8 @@ echoerr() { echo "$@" 1>&2; }
 
 # executable portion
 
+FAILURES=0
+
 while read line
 do
     echo "verifying $line"
@@ -19,21 +21,27 @@ do
         VR_FILE=file${CONTENTS}
         TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
         # loop over the possible nodes trying to guess the master
-        MASTER_GUESS=0
-        RESULT=255
-        while [ $MASTER_GUESS -le $N -a $RESULT -ne 0 ]
+        NOT_YET_DEAD_NODE=1
+        while [[ ( $NOT_YET_DEAD_NODE -le $N ) && \
+            `grep -q '^$NOT_YET_DEAD_NODE$' $WORKAREA/stoppednodes` -ne 0 ]]
         do
-            cat > $TEMPFILE <<EOF
+            NOT_YET_DEAD_NODE=`expr $NOT_YET_DEAD_NODE + 1`
+        done
+
+        cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
 %%! -sname verify_${RANDOM}@localhost
 main (_) ->
-  client:start_link(n${MASTER_GUESS}@localhost),
+  client:start_link(n${NOT_YET_DEAD_NODE}@localhost),
   PhatContents = client:call({getcontents, {handle,[$VR_FILE]}}),
   ActualContents = "$CONTENTS",
   case PhatContents of
      {error,file_not_found} ->
         io:format("File $VR_FILE was not created in the Phat file system!~n"),
         halt(2);
+     {unexpected,_} ->
+        io:format("I have no idea what happened: ~s", [PhatContents]),
+        halt(3);
      _ ->
         case string:equal(ActualContents, PhatContents) of
            true ->
@@ -46,11 +54,14 @@ main (_) ->
   end.
 
 EOF
-            escript $TEMPFILE </dev/null
-            RESULT=$?
-            MASTER_GUESS=`expr $MASTER_GUESS + 1`
-        done
+        escript $TEMPFILE </dev/null
+
+        if [ $? -ne 0 ]
+        then
+            FAILURES=`expr $FAILURES + 1`
+        fi
     fi
 done < $WORKAREA/do-log
 
-
+echo "Verification found $FAILURES failures"
+exit $FAILURES

@@ -27,25 +27,24 @@ fi
 
 if [ "$COMMAND" = "createfile" ]; then
     VR_FILE=`echo $TEMPFILE | sed 's:[/.]:_:g'`
-    echo "createfile $VR_FILE" >> $WORKAREA/do-log
-    echo "$VR_FILE" > $WORKAREA/reference-filesystem/$VR_FILE
-    echo "client:call({mkfile, {handle,[]}, [file$VR_FILE], \"$VR_FILE\"})"
     # loop over the possible nodes trying to guess the master
-    MASTER_GUESS=0
-    RESULT=255
-    while [ $MASTER_GUESS -le $N -a $RESULT -ne 0 ]
+    NOT_YET_DEAD_NODE=1
+    while [[ ( $NOT_YET_DEAD_NODE -le $N ) && \
+        `grep -q '^$NOT_YET_DEAD_NODE$' $WORKAREA/stoppednodes` -ne 0 ]]
     do
-        cat > $TEMPFILE <<EOF
+        NOT_YET_DEAD_NODE=`expr $NOT_YET_DEAD_NODE + 1`
+    done
+    cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
 %%! -sname client_$VR_FILE@localhost
 main (_) ->
-  client:start_link(n${MASTER_GUESS}@localhost),
+  client:start_link(n${NOT_YET_DEAD_NODE}@localhost),
   client:call({mkfile, {handle,[]}, [file$VR_FILE], "$VR_FILE" }).
 EOF
-        escript $TEMPFILE >> $WORKAREA/command-logs
-        RESULT=$?
-        MASTER_GUESS=`expr $MASTER_GUESS + 1`
-    done
+    escript $TEMPFILE >> $WORKAREA/command-logs
+    echo "createfile $VR_FILE" >> $WORKAREA/do-log
+    echo "$VR_FILE" > $WORKAREA/reference-filesystem/$VR_FILE
+    echo "client:call({mkfile, {handle,[]}, [file$VR_FILE], \"$VR_FILE\"})"
 fi
 
 # end possible commands
