@@ -192,7 +192,7 @@ replica(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Node
     io:fwrite("replica ~p timed out from master, initating view change for view ~p~n", [MyNode, ViewNumber]),
     sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
     {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode, 
-        masterNode := NewMaster }, Timeout };
+        masterNode := NewMaster, viewChanges := [MyNode] }, Timeout };
 
 replica({startViewChange, _, _} = VC, State) ->
     handleStartViewChange(VC, State, replica);
@@ -257,6 +257,16 @@ viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From},
         commitNumber := CommitNumber, log := MaxLog, doViewChanges := dict:new(), 
         timeout := 4100,
         viewChanges := [] }, 4100};
+
+viewChange(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Nodes, 
+    timeout := Timeout, masterNode := MasterNode } = State) ->
+    NewViewNumber = ViewNumber + 1,
+    NewMaster = chooseMaster(State, NewViewNumber),
+    ?debugFmt("timeout -- MASTER HAS FAILED?? I think new master is now ~p - initiating view change~n", [NewMaster]),
+    io:fwrite("replica ~p timed out from master, initating view change for view ~p~n", [MyNode, ViewNumber]),
+    sendToReplicas(MasterNode, Nodes, {startViewChange, NewViewNumber, MyNode}),
+    {next_state, viewChange, State#{ viewNumber := NewViewNumber, myNode := MyNode, 
+        masterNode := NewMaster, viewChanges := [MyNode] }, Timeout };
 
 viewChange(UnknownMessage, #{ timeout := Timeout} = State) ->
     ?debugFmt("view changing replica got unknown/invalid message: ~p~n", [UnknownMessage]),
@@ -326,7 +336,7 @@ handleStartViewChange({startViewChange, NewViewNumber, Node},
     commitNumber := CommitNumber, opNumber := OpNumber, log := Log,
     viewChanges := ViewChanges, masterNode := MasterNode } = State, _OldState)
     when ViewNumber == NewViewNumber ->
-    ?debugFmt("processing startViewChange~n", []),
+    ?debugFmt("~p is processing startViewChange for ~p ~n", [MyNode, Node]),
     F = (length(AllNodes) - 1) / 2,
     IsMember = lists:member(Node, ViewChanges),
     if
@@ -334,9 +344,10 @@ handleStartViewChange({startViewChange, NewViewNumber, Node},
             {next_state, viewChange, State, Timeout};
         (length(ViewChanges) + 1) > F ->
             sendToMaster(MasterNode, {doViewChange, ViewNumber, Log, OpNumber, CommitNumber, MyNode}),
-            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }};
+            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }, Timeout};
         true ->
-            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }}
+            ?debugFmt("i only see ~p view changes, need more than ~p ~n", [length(ViewChanges) + 1, F]),
+            {next_state, viewChange, State#{ viewChanges := [Node|ViewChanges] }, Timeout}
     end;
 
 handleStartViewChange({startViewChange, NewViewNumber, _Node}, 
@@ -551,6 +562,38 @@ testMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},
     rpc:call(N5, vr, stop, [Node5]),
     io:fwrite("done").
 
+testMultiMasterFailover(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3},
+    Node4 = {_, N4},Node5 = {_, N5}) ->
+    Commit = fun testPrintCommit/3,
+    Nodes = [Node1, Node2, Node3, Node4, Node5],
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
+    rpc:call(N3, vr, startNode, [Node3, Nodes, Commit]),
+    rpc:call(N4, vr, startNode, [Node4, Nodes, Commit]),
+    rpc:call(N5, vr, startNode, [Node5, Nodes, Commit]),
+    startPrepare(Node1, self(), 1, hello1),
+    testReceiveResult(),
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]),
+    io:fwrite("now killed master and next master, waiting 12 seconds...~n"),
+    waitBetweenTests(12000),
+    io:fwrite("bringing the master and next master back up~n"),
+    rpc:call(N1, vr, startNode, [Node1, Nodes, Commit]),
+    rpc:call(N2, vr, startNode, [Node2, Nodes, Commit]),
+    waitBetweenTests(100),
+    io:fwrite("sending next operation~n"),
+    startPrepare(Node3, self(), 2, hello2),
+    testReceiveResult(),
+    io:fwrite("idling to flush commits~n"),
+    waitBetweenTests(2100),
+    rpc:call(N1, vr, stop, [Node1]),
+    rpc:call(N2, vr, stop, [Node2]),
+    rpc:call(N3, vr, stop, [Node3]),
+    rpc:call(N4, vr, stop, [Node4]),
+    rpc:call(N5, vr, stop, [Node5]),
+    io:fwrite("done").
+
+
 testRecovery(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     io:fwrite("only starting nodes 1 and 2, then sending 2 requests~n"),
     Commit = fun testPrintCommit/3,
@@ -573,6 +616,7 @@ testRecovery(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     rpc:call(N2, vr, stop, [Node2]),
     rpc:call(N3, vr, stop, [Node3]),
     io:fwrite("done").
+
 
 testCyclePrimary(Node1 = {_,N1}, Node2 = {_,N2}, Node3 = {_, N3}) ->
     Commit = fun testPrintCommit/3,
@@ -628,10 +672,13 @@ runTest(Node1, Node2, Node3, Node4, Node5) ->
     % io:fwrite("~n~n--- Testing master failover...~n"),
     % testMasterFailover(Node1, Node2, Node3, Node4, Node5),
     % waitBetweenTests(100),
+    io:fwrite("~n~n--- Testing multi master failover...~n"),
+    testMultiMasterFailover(Node1, Node2, Node3, Node4, Node5),
+    waitBetweenTests(100),
     % io:fwrite("~n~n--- Testing recovery...~n"),
     % testRecovery(Node1, Node2, Node3),
     % waitBetweenTests(100),
-    io:fwrite("~n~n--- Testing primary cycle w/o timeout...~n"),
-    testCyclePrimary(Node1, Node2, Node3),
-    waitBetweenTests(100),
+    % io:fwrite("~n~n--- Testing primary cycle w/o timeout...~n"),
+    % testCyclePrimary(Node1, Node2, Node3),
+    % waitBetweenTests(100),
     io:fwrite("~n~n--- Tests complete ~n").
