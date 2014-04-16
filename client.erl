@@ -28,7 +28,7 @@ nextMaster(Master,[],Alternates) ->
 handle_call(Operation,Caller,State) ->
     #{seq := SeqNum, master := Master, alternates := Alternates} = State,
     Client = self(),
-    Response = rpc:block_call(Master, server, clientRequest, [SeqNum,Operation], 4000),
+    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation], 4000),
     case Response of
         timeout ->
 	    NewMaster = nextMaster(Master,Alternates,Alternates),
