@@ -24,7 +24,7 @@ if [ "$COMMAND" = "createfile" ]; then
     echo "client:start_link([n${TARGET}@localhost])"
     cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
-%%! -sname client_${FILENAME}@localhost
+%%! -sname client_${FILENAME}@localhost -hidden
 main (_) ->
   client:start_link([n${TARGET}@localhost]),
   RESULT=client:call({mkfile, {handle,[]}, [$FILENAME], "$CONTENTS" }),

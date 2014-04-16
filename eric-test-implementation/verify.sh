@@ -15,7 +15,7 @@ echoerr() { echo "$@" 1>&2; }
 TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
 cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
-%%! -sname verify_${RANDOM}@localhost
+%%! -sname verify_${RANDOM}@localhost -hidden
 main (_) ->
   client:start_link([n${TARGET}@localhost]),
   PhatContents = client:call({getcontents, {handle,[$FILENAME]}}),

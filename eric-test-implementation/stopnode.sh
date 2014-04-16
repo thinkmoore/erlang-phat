@@ -17,7 +17,7 @@ if [ 0 -ne $? ]; then
 fi
 cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
-%%! -sname connector_stopnode_${RANDOM}@localhost
+%%! -sname connector_stopnode_${RANDOM}@localhost -hidden
 main (_) ->
   rpc:block_call(n${I}@localhost,phat,stop,[]).
 EOF
