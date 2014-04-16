@@ -31,8 +31,6 @@ function timer_total() {
 bash ${IMPL}/initialize.sh $WORKAREA
 bash ${IMPL}/startnodes.sh $N $WORKAREA
 
-sleep 5 # wait for the nodes to initialize
-
 time timer_total
 
 bash ${IMPL}/verify.sh $N $WORKAREA

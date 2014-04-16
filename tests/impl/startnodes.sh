@@ -38,7 +38,7 @@ mkdir $WORKAREA/logs0
 mkdir $WORKAREA/pipes0
 run_erl -daemon $WORKAREA/pipes0/ $WORKAREA/logs0 "erl -sname n0@localhost -eval \"initialize_phat:init($N)\""
 
-sleep 1
+sleep `expr $N / 2`
 
 # to kill the processes after you are done use
 # killall beam.smp
