@@ -12,15 +12,12 @@ WORKAREA=$3
 function timer_total() {
     for i in `seq 1 2` # repeat 100
     do
-        bash ${IMPL}/stopnode.sh replica $N $WORKAREA
+        bash ${IMPL}/stopnode.sh replica $N $WORKAREA $RANDOM
         for i in `seq 1 10` # repeat 10
         do
-            for i in `seq 1 5` # do 5 in parallel
-            do
-                bash ${IMPL}/do.sh createfile 15 $N $WORKAREA &
-            done
+            bash ${IMPL}/do.sh createfile 15 $N $WORKAREA $RANDOM
         done
-        bash ${IMPL}/revivenode.sh $N $WORKAREA
+        bash ${IMPL}/revivenode.sh $N $WORKAREA $RANDOM
     done
 }
 
@@ -28,6 +25,9 @@ function timer_total() {
 
 bash ${IMPL}/initialize.sh $WORKAREA
 bash ${IMPL}/startnodes.sh $N $WORKAREA
+
+sleep 5 # wait for the nodes to initialize
+
 time timer_total
 
 bash ${IMPL}/verify.sh $N $WORKAREA
