@@ -7,22 +7,16 @@ function die() { echo "$@" 1>&2 ; exit 1; }
 
 N=$1
 WORKAREA=$2
-SEED=$3
 
-[ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
+[ "$#" -eq 2 ] || die "2 arguments required, $# provided. Valid invocation:
 
-  bash startnodes.sh N workarea seed
+  bash startnodes.sh N workarea
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
-  - seed -- the random seed for this file
 "
 
 # executable portion
-
-if [ -n $SEED ]; then
-    RANDOM=$SEED
-fi
 
 # start the master and slaves
 for i in `seq 1 $N`;
