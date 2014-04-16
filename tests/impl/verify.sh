@@ -7,13 +7,15 @@ echoerr() { echo "$@" 1>&2; }
 
 N=$1
 WORKAREA=$2
+VERIFY_IMPL=$3
 
-[ "$#" -eq 2 ] || die "2 arguments required, $# provided. Valid invocation:
+[ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
 
-  bash verify.sh N workarea
+  bash verify.sh N workarea verify_impl
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
+  - verify_impl -- a group-specific implementation of file verification
 "
 
 # executable portion
@@ -35,33 +37,7 @@ do
             NOT_YET_DEAD_NODE=`expr $NOT_YET_DEAD_NODE + 1`
         done
 
-        cat > $TEMPFILE <<EOF
-#!/usr/bin/env escript
-%%! -sname verify_${RANDOM}@localhost
-main (_) ->
-  client:start_link([n${NOT_YET_DEAD_NODE}@localhost]),
-  PhatContents = client:call({getcontents, {handle,[$VR_FILE]}}),
-  ActualContents = "$CONTENTS",
-  case PhatContents of
-     {error,file_not_found} ->
-        io:format("File $VR_FILE was not created in the Phat file system!~n"),
-        halt(2);
-     {unexpected,_} ->
-        io:format("I have no idea what happened: ~s", [PhatContents]),
-        halt(3);
-     _ ->
-        case string:equal(ActualContents, PhatContents) of
-           true ->
-              halt(0);
-           false ->
-              io:format("Phat value, ~s, differs from actual value, ~s.~n",
-                        [PhatContents, ActualContents]),
-              halt(1)
-        end
-  end.
-
-EOF
-        escript $TEMPFILE </dev/null
+        $VERIFY_IMPL $NOT_YET_DEAD_NODE $VR_FILE $CONTENTS
 
         if [ $? -ne 0 ]
         then

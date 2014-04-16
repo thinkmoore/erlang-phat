@@ -13,6 +13,7 @@ DO_IMPL="bash ${ERIC}/do.sh"
 STOP_IMPL="bash ${ERIC}/stopnode.sh"
 REVIVE_IMPL="bash ${ERIC}/revivenode.sh"
 STARTNODES_IMPL="bash ${ERIC}/startnodes.sh"
+VERIFY_IMPL="bash ${ERIC}/verify.sh"
 
 # functions
 
@@ -35,4 +36,4 @@ $STARTNODES_IMPL $N $WORKAREA
 
 time timer_total
 
-bash ${IMPL}/verify.sh $N $WORKAREA
+bash ${IMPL}/verify.sh $N $WORKAREA "$VERIFY_IMPL"
