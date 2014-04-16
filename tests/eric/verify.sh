@@ -12,6 +12,7 @@ echoerr() { echo "$@" 1>&2; }
 
 # executable
 
+TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
 cat > $TEMPFILE <<EOF
 #!/usr/bin/env escript
 %%! -sname verify_${RANDOM}@localhost

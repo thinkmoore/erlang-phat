@@ -28,8 +28,6 @@ do
     if [[ "$line" =~ createfile\ (.*) ]]; then
         CONTENTS=$(cat $WORKAREA/reference-filesystem/${BASH_REMATCH[1]})
         VR_FILE=file${CONTENTS}
-        TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
-        # loop over the possible nodes trying to guess the master
         NOT_YET_DEAD_NODE=1
         while [[ ( $NOT_YET_DEAD_NODE -le $N ) && \
             `grep -q '^$NOT_YET_DEAD_NODE$' $WORKAREA/stoppednodes` -ne 0 ]]
