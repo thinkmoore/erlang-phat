@@ -12,6 +12,7 @@ ERIC=/Users/danking/projects/erlang-phat/tests/eric
 DO_IMPL="bash ${ERIC}/do.sh"
 STOP_IMPL="bash ${ERIC}/stopnode.sh"
 REVIVE_IMPL="bash ${ERIC}/revivenode.sh"
+STARTNODES_IMPL="bash ${ERIC}/startnodes.sh"
 
 # functions
 
@@ -30,7 +31,7 @@ function timer_total() {
 # executable portion
 
 bash ${IMPL}/initialize.sh $WORKAREA
-bash ${IMPL}/startnodes.sh $N $WORKAREA
+$STARTNODES_IMPL $N $WORKAREA
 
 time timer_total
 
