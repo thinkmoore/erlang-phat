@@ -19,7 +19,7 @@ SEED=$5
   - count -- the number of times to run, in parallel, the command
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
-  - seed -- the $RANDOM seed for this file
+  - seed -- the random seed for this file
 "
 
 # functions

@@ -15,7 +15,7 @@ SEED=$3
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
-  - seed -- the $RANDOM seed for this file
+  - seed -- the random seed for this file
 "
 
 # executable portion
