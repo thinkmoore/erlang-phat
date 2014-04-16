@@ -25,14 +25,14 @@ main (_) ->
         io:format("File $FILENAME was not created in the Phat file system!~n"),
         halt(2);
      {unexpected,_} ->
-        io:format("I have no idea what happened: ~s", [PhatContents]),
+        io:format("I have no idea what happened: ~p", [PhatContents]),
         halt(3);
      _ ->
         case string:equal(ActualContents, PhatContents) of
            true ->
               halt(0);
            false ->
-              io:format("Phat value, ~s, differs from actual value, ~s.~n",
+              io:format("Phat value, ~p, differs from actual value, ~p.~n",
                         [PhatContents, ActualContents]),
               halt(1)
         end
