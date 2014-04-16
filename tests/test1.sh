@@ -7,14 +7,17 @@ N=$1
 IMPL=$2
 WORKAREA=$3
 
-DO_IMPL='bash /Users/danking/projects/erlang-phat/tests/eric/do.sh'
+ERIC=/Users/danking/projects/erlang-phat/tests/eric
+
+DO_IMPL="bash ${ERIC}/do.sh"
+STOP_IMPL="bash ${ERIC}/stopnode.sh"
 
 # functions
 
 function timer_total() {
     for i in `seq 1 2` # repeat 100
     do
-        bash ${IMPL}/stopnode.sh replica $N $WORKAREA $RANDOM
+        bash ${IMPL}/stopnode.sh replica $N $WORKAREA $RANDOM "$STOP_IMPL"
         for i in `seq 1 10` # repeat 10
         do
             bash ${IMPL}/do.sh createfile 15 $N $WORKAREA $RANDOM "$DO_IMPL"
