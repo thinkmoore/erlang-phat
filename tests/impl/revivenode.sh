@@ -11,7 +11,7 @@ SEED=$3
 
 [ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
 
-  bash do.sh N workarea seed
+  bash revivenode.sh N workarea seed
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing

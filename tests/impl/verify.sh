@@ -10,7 +10,7 @@ WORKAREA=$2
 
 [ "$#" -eq 2 ] || die "2 arguments required, $# provided. Valid invocation:
 
-  bash do.sh N workarea
+  bash verify.sh N workarea
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
