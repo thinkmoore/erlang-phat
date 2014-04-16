@@ -3,9 +3,20 @@
 
 # arguments
 
-N=$1
+F=$1
 IMPL=$2
 WORKAREA=$3
+
+[ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
+
+  bash random-test.sh f impl_directory workarea
+
+  - f -- the number of failures to resist
+  - impl_directory -- a path, relative to CWD, to the impl directory, don't include a trailing slash
+  - workarea -- a directory in which to place temporary files for testing
+"
+
+N=$((F * 2 + 1))
 
 ERIC=/Users/danking/projects/erlang-phat/tests/eric
 
