@@ -11,6 +11,7 @@ ERIC=/Users/danking/projects/erlang-phat/tests/eric
 
 DO_IMPL="bash ${ERIC}/do.sh"
 STOP_IMPL="bash ${ERIC}/stopnode.sh"
+REVIVE_IMPL="bash ${ERIC}/revivenode.sh"
 
 # functions
 
@@ -22,7 +23,7 @@ function timer_total() {
         do
             bash ${IMPL}/do.sh createfile 15 $N $WORKAREA $RANDOM "$DO_IMPL"
         done
-        bash ${IMPL}/revivenode.sh $N $WORKAREA $RANDOM
+        bash ${IMPL}/revivenode.sh $N $WORKAREA $RANDOM "$REVIVE_IMPL"
     done
 }
 

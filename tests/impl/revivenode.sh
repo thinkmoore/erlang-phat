@@ -8,14 +8,16 @@ function die() { echo "$@" 1>&2 ; exit 1; }
 N=$1
 WORKAREA=$2
 SEED=$3
+REVIVE_IMPL=$4
 
-[ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
+[ "$#" -eq 4 ] || die "4 arguments required, $# provided. Valid invocation:
 
-  bash revivenode.sh N workarea seed
+  bash revivenode.sh N workarea seed revive_impl
 
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
   - seed -- the random seed for this file
+  - revive_impl -- the group-specific implementation of reviving a node
 "
 
 # executable portion
@@ -31,18 +33,6 @@ if [ "$i" = "primary" ]; then
     echo "reviving primary is unimplemented"
     exit 1;
 else
-    TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXXX)
-    if [ 0 -ne $? ]; then
-        echoerr "Could not create a temporary file, cannot complete"
-        exit 1
-    fi
-    cat > $TEMPFILE <<EOF
-#!/usr/bin/env escript
-%%! -sname connector${RANDOM}@localhost
-main (_) ->
-  rpc:block_call(n${i}@localhost,phat,restart,[]).
-EOF
-    escript $TEMPFILE
+    $REVIVE_IMPL $i
     echo "revived n${i}@localhost"
-    rm -f $TEMPFILE
 fi
