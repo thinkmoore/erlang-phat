@@ -2,6 +2,9 @@
 
 WORKAREA=$1
 
+[ ! -a "$WORKAREA" ] && mkdir -p $WORKAREA
+[ ! -d "$WORKAREA" ] && echo "The workarea, $WORKAREA, is not an extant directory" && exit 1
+
 rm -rf $WORKAREA/stoppednodes
 rm -rf $WORKAREA/stoppednodes.bak
 rm -rf /tmp/phat-escript.*
