@@ -40,4 +40,6 @@ main (_) ->
 
 EOF
 escript $TEMPFILE </dev/null
+ERR=$?
 rm -f $TEMPFILE
+exit $ERR
