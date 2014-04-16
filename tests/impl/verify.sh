@@ -1,13 +1,20 @@
 #!/bin/bash
 
+die() { echo "$@" 1>&2 ; exit 1; }
+echoerr() { echo "$@" 1>&2; }
+
 # arguments
 
 N=$1
 WORKAREA=$2
 
-# functions
+[ "$#" -eq 2 ] || die "2 arguments required, $# provided. Valid invocation:
 
-echoerr() { echo "$@" 1>&2; }
+  bash do.sh N workarea
+
+  - N -- the number of nodes in the Phat cluster
+  - workarea -- a directory in which to place temporary files for testing
+"
 
 # executable portion
 

@@ -1,8 +1,24 @@
 #!/bin/bash
 
+function echoerr() { echo "$@" 1>&2; }
+function die() { echo "$@" 1>&2 ; exit 1; }
+
+# arguments
+
 N=$1
 WORKAREA=$2
 SEED=$3
+
+[ "$#" -eq 3 ] || die "3 arguments required, $# provided. Valid invocation:
+
+  bash do.sh N workarea seed
+
+  - N -- the number of nodes in the Phat cluster
+  - workarea -- a directory in which to place temporary files for testing
+  - seed -- the $RANDOM seed for this file
+"
+
+# executable portion
 
 if [ -n $SEED ]; then
     RANDOM=$SEED

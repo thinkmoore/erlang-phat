@@ -1,5 +1,8 @@
 #!/bin/sh
 
+function die() { echo "$@" 1>&2 ; exit 1; }
+function echoerr() { echo "$@" 1>&2; }
+
 # arguments
 
 COMMAND=$1
@@ -8,9 +11,19 @@ N=$3
 WORKAREA=$4
 SEED=$5
 
+[ "$#" -eq 5 ] || die "5 arguments required, $# provided. Valid invocation:
+
+  bash do.sh command_name count N workarea seed
+
+  - command_name -- the file system command to run
+  - count -- the number of times to run, in parallel, the command
+  - N -- the number of nodes in the Phat cluster
+  - workarea -- a directory in which to place temporary files for testing
+  - seed -- the $RANDOM seed for this file
+"
+
 # functions
 
-echoerr() { echo "$@" 1>&2; }
 
 # executable portion
 if [ -n $SEED ]; then
