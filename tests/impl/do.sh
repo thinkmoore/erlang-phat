@@ -6,41 +6,27 @@ function echoerr() { echo "$@" 1>&2; }
 # arguments
 
 COMMAND=$1
-#COUNT=$2 # unused
+COUNT=$2
 N=$3
 WORKAREA=$4
 SEED=$5
+DO_IMPL=$6
 
-[ "$#" -eq 5 ] || die "5 arguments required, $# provided. Valid invocation:
+[ "$#" -eq 6 ] || die "6 arguments required, $# provided. Valid invocation:
 
-  bash do.sh command_name count N workarea seed
+  bash do.sh command_name count N workarea seed do_impl
 
   - command_name -- the file system command to run
   - count -- the number of times to run, in parallel, the command
   - N -- the number of nodes in the Phat cluster
   - workarea -- a directory in which to place temporary files for testing
   - seed -- the random seed for this file
+  - do_impl -- the group-specific implementation of do.sh
 "
 
 # functions
 
-
-# executable portion
-if [ -n $SEED ]; then
-    RANDOM=$SEED
-fi
-
-TEMPFILE=$(mktemp /tmp/phat_escript.XXXXXXX)
-if [ 0 -ne $? ]; then
-    echoerr "Could not create a temporary file, cannot complete"
-    exit 1
-fi
-
-# begin possible commands
-
-if [ "$COMMAND" = "createfile" ]; then
-    VR_FILE=`echo $TEMPFILE | sed 's:[/.]:_:g'`
-    # loop over the possible nodes trying to guess the master
+function find_live_node() {
     NOT_YET_DEAD_NODE=1
     grep -q "^${NOT_YET_DEAD_NODE}\$" $WORKAREA/stoppednodes
     RESULT=$?
@@ -50,25 +36,32 @@ if [ "$COMMAND" = "createfile" ]; then
         RESULT=$?
         NOT_YET_DEAD_NODE=`expr $NOT_YET_DEAD_NODE + 1`
     done
-    cat > $TEMPFILE <<EOF
-#!/usr/bin/env escript
-%%! -sname client_$VR_FILE@localhost
-main (_) ->
-  client:start_link([n${NOT_YET_DEAD_NODE}@localhost]),
-  client:call({mkfile, {handle,[]}, [file$VR_FILE], "$VR_FILE" }).
-EOF
-    escript $TEMPFILE >> $WORKAREA/command-logs
-    EXITCODE=$?
-    echo "createfile $VR_FILE" >> $WORKAREA/do-log
-    echo "$VR_FILE" > $WORKAREA/reference-filesystem/$VR_FILE
-    echo "client:call({mkfile, {handle,[]}, [file$VR_FILE], \"$VR_FILE\"})"
-    if [ $EXITCODE -ne 0 ]
-    then
-        echo "  previous call failed, exit code was $EXITCODE"
-        echo "  tried talking to n${NOT_YET_DEAD_NODE}@localhost"
-    fi
+    return $NOT_YET_DEAD_NODE
+}
+
+# executable portion
+if [ -n $SEED ]; then
+    RANDOM=$SEED
 fi
 
-# end possible commands
+if [ 0 -ne $? ]; then
+    echoerr "Could not create a temporary file, cannot complete"
+    exit 1
+fi
 
-rm -f $TEMPFILE
+# begin possible commands
+
+if [ "$COMMAND" = "createfile" ]; then
+    find_live_node
+    NOT_YET_DEAD_NODE=$?
+    for i in `seq 1 $COUNT` # repeat 10
+    do
+        CONTENTS=${RANDOM}_${RANDOM}
+        NAME=file$CONTENTS
+        ${DO_IMPL} "createfile" $NOT_YET_DEAD_NODE $NAME $CONTENTS $WORKAREA &
+        echo "createfile ${NAME}" >> $WORKAREA/do-log
+        echo "${CONTENTS}" > $WORKAREA/reference-filesystem/${NAME}
+    done
+    sleep 2
+fi
+
