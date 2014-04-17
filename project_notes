@@ -1,0 +1,80 @@
+n number of total nodes
+g number of paxos groups
+f number of paxos failures per group n = g *(2f+1)
+
+files are divided into g-1 chunks
+the first g -1 groups get the ith chunk, the last group gets the xor of all the others
+
+API:
+
+code = store(key, value)
+
+put {
+
+// get latest version and increment
+
+// split the file into g-1 chunks 
+
+// compute the xor
+
+for (i = 1:g) {
+send to i mkfile /entries/${key}/${version}/chunk${i}
+}
+
+// wait for all responses and return new version number
+
+}
+
+file = get(key,version)
+
+get {
+
+for (i =1:g) {
+send to i getcontents /entries/${key}/${version}/chunk${i}
+}
+
+// wait for g-1 responses
+
+if (one is the xor) {
+// xor the chunks to compute the missing
+}
+
+// append all chunks
+
+// send to client code
+
+}
+
+
+
+Group recovery
+
+// Two phase commit
+
+// collect all filesystems from everybody
+
+// xor the chunks
+
+G1    G2   G3
+O      O	O
+O      O	O
+O      O	O
+
+Coordinator lives on all nodes
+
+// File system contains just version numbers
+
+
+
+
+File system unrecoverable after 4f+2 failures (2 whole groups) in the worst case
+Client requests cannot be completed after f  + 2 (2 VR group failures) in the worst case 
+
+With independent coordinator group:
+File system possibly recoverable with up to 2f * g +1 failures (all groups have 2f failures one has complete failure)
+Client requests can possibly be completed with up to 2f+1 + f *(g-1) = f + 1 + fg (one complete failure and the rest have f failures)
+
+Coordinator group has 2 gf + g so this supports gf + g/2 -1 failures
+
+
+
