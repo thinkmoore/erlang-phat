@@ -76,5 +76,7 @@ Client requests can possibly be completed with up to 2f+1 + f *(g-1) = f + 1 + f
 
 Coordinator group has 2 gf + g so this supports gf + g/2 -1 failures
 
+Version number from the paxos groups <time|group #> and no coordinator
 
+By breaking up a file and sending it to multiple paxos groups we can replicate it faster than without it. So are error correcting codes faster than paxos.
 
