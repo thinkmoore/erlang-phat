@@ -1,31 +1,39 @@
 -module(client).
 -behavior(gen_server).
-%%-define(NODEBUG, true). %% comment out for debugging messages
+%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,init/1,handle_call/3,call/1,start/0]).
 
-%% State is {master => MasterNode, seq => SequenceNumber}
+%% State is {master => MasterNode, alternates => Nodes, seq => SequenceNumber}
 
 start() ->
-    start_link(n1@localhost).
+    start_link([n1@localhost]).
 
-start_link(Master) ->
-    gen_server:start_link({local,client},client,[Master],[]).
+start_link(Nodes) ->
+    gen_server:start_link({local,client},client,Nodes,[]).
 
-init([Master]) ->
-    {ok, #{master => Master, seq => 0}}.
+init([Master|Rest]) ->
+    {ok, #{master => Master, alternates => [Master|Rest], seq => 0}}.
 
 call(Operation) ->
     gen_server:call(client,Operation).
 
+nextMaster(Master,[Master,Next|_],_) ->
+    Next;
+nextMaster(Master,[_|Rest],Alternates) ->
+    nextMaster(Master,Rest,Alternates);
+nextMaster(Master,[],Alternates) ->
+    nextMaster(Master,Alternates,Alternates).
+
 handle_call(Operation,Caller,State) ->
-    #{seq := SeqNum, master := Master} = State,
+    #{seq := SeqNum, master := Master, alternates := Alternates} = State,
     Client = self(),
-    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation]),
+    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation], 4000),
     case Response of
         timeout ->
-	    ?debugMsg("Timeout, trying again~n"),
-	    handle_call(Operation, Caller, State);
+	    NewMaster = nextMaster(Master,Alternates,Alternates),
+	    ?debugFmt("Timeout, trying again with next alternate ~p~n", [NewMaster]),
+	    handle_call(Operation, Caller, State#{master := NewMaster});
 	{Number,{ok,Result}} -> 
 	    if 
 		Number < SeqNum ->

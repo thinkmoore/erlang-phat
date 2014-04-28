@@ -1,0 +1,3 @@
+[submodule "phat-tests"]
+	path = phat-tests
+	url = git@github.com:danking/phat-tests.git
