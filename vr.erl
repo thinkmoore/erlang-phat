@@ -3,6 +3,7 @@
 -export([test/1]).
 -export([master/2, replica/2, viewChange/2, recovery/2, handle_event/3, init/1, terminate/3]).
 -export([code_change/4,handle_info/3,handle_sync_event/4]).
+-export([testOldValue/2,testTwoCommits/2,testMasterFailover/5,testRecovery/3,testCyclePrimary/3]).
 -behavior(gen_fsm).
 -define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").

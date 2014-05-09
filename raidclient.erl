@@ -3,6 +3,7 @@
 %-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
+-export([code_change/3,handle_info/2]).
 
 start_link(Nodes) ->
     gen_server:start_link({local,raid},raidclient,Nodes,[]).
@@ -25,6 +26,10 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 handle_cast(_,_) ->
     {error,async_unsupported}.
+code_change(_,_,_) ->
+    {error,code_change_unsupported}.
+handle_info(_,_) ->
+    {error,info_unsupported}.
 
 do_split_binary(Size, B) when byte_size(B) >= Size->
     {Chunk, Rest} = split_binary(B, Size),
@@ -46,26 +51,32 @@ binary_to_chunks(B,G) ->
     Xor = xor_all(Splits),
     [Xor|Splits].
 
-do_chunk(Chunk,Num) ->
-    client:call({mkfile,{handle,[]},[Num],""}),
-    client:call({putcontents,{handle,[Num]},Chunk}),
-    Num + 1.
+do_chunk_helper (Name) -> 
+    Helper = 
+	fun (Chunk,Num) -> 
+	    do_chunk(Chunk,Name,Num), 
+	    Num + 1 end,
+    Helper.
 
-get_chunk(Num) ->
-    client:call({getcontents,{handle,[Num]}}).
+do_chunk(Chunk,Name,Num) ->
+    client:call({mkfile,{handle,[]},[Name, Num],""}),
+    client:call({putcontents,{handle,[Name, Num]},Chunk}).
 
-get_chunks(0) ->
-    [get_chunk(0)];
-get_chunks(N) ->
-    [get_chunk(N)|get_chunks(N-1)].
+get_chunk(Name,Num) ->
+    client:call({getcontents,{handle,[Name,Num]}}).
 
-handle_call({store,Data},_,State = #{ chunks := G}) ->
+get_chunks(Name,0) ->
+    [get_chunk(Name,0)];
+get_chunks(Name,N) ->
+    [get_chunk(Name,N)|get_chunks(Name,N-1)].
+
+handle_call({store,Name,Data},_,State = #{ chunks := G}) ->
     Binary = binary:list_to_bin(Data),
     Parts = binary_to_chunks(Binary,G),
-    lists:foldl(fun do_chunk/2, 0, Parts),
+    lists:foldl(do_chunk_helper(Name), 0, Parts),
     {reply, done, State};
-handle_call({get},_,State = #{ chunks := G}) ->
-    [Check|Parts] = lists:reverse(get_chunks(G)),
+handle_call({get,Name},_,State = #{ chunks := G}) ->
+    [Check|Parts] = lists:reverse(get_chunks(Name,G)),
     io:fwrite("~p~n", [[Check|Parts]]),
     Data = lists:foldl(fun (E,Acc) -> << Acc/binary, E/binary >> end, <<>>, Parts),
     io:fwrite("~p~n", [binary_to_list(Data)]),
