@@ -1,8 +1,18 @@
 -module(testfs).
 
--export([test1/0,testLock/0,testTimeout/0,testRefresh/0,getLock/2,testClient/0]).
+-export([test1/0,test2/0,testLock/0,testTimeout/0,testRefresh/0,getLock/2,testClient/0,testClient2/0,testClient3/0]).
 
 test1() ->
+    fs:start_link(),
+    {ok,Root} = fs:getroot(),
+    {ok,H} = fs:mkfile(Root,["hey there"],"Hello there"),
+    {ok,Initial} = fs:getcontents(H),
+    fs:putcontents(H,"I'm out"),
+    {ok,Final} = fs:getcontents(H),
+    io:fwrite("~p ~p~n", [Initial,Final]),
+    fs:stop().
+
+test2() ->
     fs:stop(),
     fs:start_link(),
     {ok,Root} = fs:getroot(),
@@ -10,7 +20,10 @@ test1() ->
     {ok,Initial} = fs:getcontents(H),
     fs:putcontents(H,"I'm out"),
     {ok,Final} = fs:getcontents(H),
-    {Initial,Final}.
+    Error = fs:mkfile(Root,["hey there"],"Dude."),
+    {ok,Third} = fs:getcontents(H),
+    io:fwrite("~p ~p ~p ~p~n", [Initial,Final,Error,Third]),
+    fs:stop().
 
 testLock() ->
     fs:start_link(),
@@ -89,3 +102,33 @@ testClient() ->
     io:fwrite("flock result: ~p~n", [S2]),
     client:call({remove,H}).
     
+testClient2() ->
+    client:start(),
+    Root = client:call({getroot}),
+    H = client:call({mkfile,Root,["bar","baz","quux"],"!!!"}),
+    io:fwrite("mkfile result: ~p~n", [H]),
+    H2 = client:call({mkfile,Root,["bar","baz","quux"],"AHHHHH"}),
+    io:fwrite("2nd mkfile result: ~p~n", [H2]),
+    client:stop().
+
+testClient3() ->
+    client:start(),
+    Remove = client:call({remove,{handle,[foo]}}),
+    io:fwrite("remove result: ~p~n", [Remove]),
+    Root = client:call({getroot}),
+    io:fwrite("root result: ~p~n", [Root]),
+    H = client:call({mkfile,Root,[foo],bar}), 
+    io:fwrite("mkfile result: ~p~n", [H]),
+    Put1 = client:call({putcontents,H,baz}), 
+    io:fwrite("put1 result: ~p~n", [Put1]),
+    Contents1 = client:call({getcontents,H}), 
+    io:fwrite("get1 result: ~p~n",[Contents1]),
+    Put2 = client:call({putcontents,H,qux}), 
+    io:fwrite("put1 result: ~p~n", [Put2]),
+    Contents2 = client:call({getcontents,H}), 
+    io:fwrite("get1 result: ~p~n",[Contents2]),
+    Dump = client:call({dump}),
+    io:fwrite("dump result: ~p~n",[Dump]),
+    Clear = client:call({clear}),
+    io:fwrite("clear result: ~p~n",[Clear]),
+    client:stop().

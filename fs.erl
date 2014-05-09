@@ -1,12 +1,13 @@
 -module(fs).
 -behavior(gen_server).
--define(NODEBUG, true). %% comment out for debugging messages
+%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
 -export([start_link/0,init/1,terminate/2]).
 -export([code_change/3,handle_call/3,handle_cast/2,stop/0,handle_info/2]).
 -export([getroot/0,mkfile/3,open/2,getcontents/1,putcontents/2,readdir/1]).
 -export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1,checktimeout/2,forcelock/3,dontlock/1]).
+-export([dump/0,clear/0]).
 
 %% Calls into the server
 getroot() ->
@@ -39,6 +40,12 @@ refreshlock(Handle,Timeout) ->
     gen_server:call(fs,{refreshlock,Handle,Timeout}).
 remove(Handle) ->
     gen_server:call(fs,{remove,Handle}).
+% get the whole file system
+dump() ->
+    gen_server:call(fs,{dump}).
+% remove all files
+clear() ->
+    gen_server:call(fs,{clear}).
 
 
 %% Server startup
@@ -50,7 +57,7 @@ init(_) ->
 
 %% Server teardown
 terminate(Reason,_) ->
-    io:fwrite("Filesystem terminating!~n~p~n", [Reason]).
+    io:fwrite("Filesystem terminating! Reason: ~p~n", [Reason]).
 stop() ->
     gen_server:cast(fs, stop).
 
@@ -102,7 +109,12 @@ handle_call({refreshlock,Handle,Timeout},_,State) ->
     {reply,Resp,NewState};
 handle_call({remove,Handle},_,State) ->
     {Resp,NewState} = remove(Handle,State),
+    ?debugFmt("remove response: ~p~n", [Resp]),
     {reply,Resp,NewState};
+handle_call({dump},_,State) ->
+    {reply,{ok,State},State};
+handle_call({clear},_,State) ->
+    {reply,init(foo),State};
 handle_call(OpName,_,State) ->
     {reply, {error, {illegal_fs_operation, OpName}}, State}.
 
@@ -208,7 +220,7 @@ putcontents({handle,Path},Data,State) ->
 	{ok, {file,LockState,_}} ->
 	    NewState = dict:store(Path,{file,LockState,Data},State),
 	    ?debugFmt("mkdir final state: ~p~n~p~n", [Path,NewState]),
-	    {ok,NewState};
+	    {{ok, ok},NewState};
 	{ok, {dir,_,_}} ->
 	    {{error, not_a_file},State};
 	error -> 
@@ -419,8 +431,8 @@ remove({handle,Path},State) ->
 	    %% TODO is keydelete slow?
 	    NewChildren = Children--[Name],
 	    NewNewState = dict:store(PathTo,{dir,Locks,NewChildren},NewState),
-	    ?debugFmt("remove final state: ~p~n~p~n", [Path,NewNewState]),
-	    {ok,NewNewState};
+	    ?debugFmt("remove final state: ~p ~p~n~p~n", [ok,Path,NewNewState]),
+	    {{ok,removed},NewNewState};
 	{ok, {dir,_,Children}} ->
 	    case Children of
 		[] ->
@@ -432,7 +444,7 @@ remove({handle,Path},State) ->
 		    NewChildren = Children--[Name],
 		    NewNewState = dict:store(PathTo,{dir,Locks,NewChildren},NewState),
 		    ?debugFmt("remove final state: ~p~n~p~n", [Path,NewNewState]),
-		    {ok,NewNewState};
+		    {{ok,removed},NewNewState};
 		_ ->
 		    ?debugFmt("ERROR nonempty dir: ~p~n~p~n", [Path,State]),
 		    {{error, cannot_remove_nonempty_dir},State}

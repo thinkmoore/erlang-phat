@@ -1,5 +1,7 @@
 -module(server).
 -behavior(gen_server).
+%-define(NODEBUG, true). %% comment out for debugging messages
+-include_lib("eunit/include/eunit.hrl").
 
 -export([init/1,handle_cast/2,terminate/2]).
 -export([handle_call/3,handle_info/2,code_change/3]).
@@ -54,9 +56,10 @@ clientRequest(Seq,Operation) ->
 	_ ->
 	    NewOp = Operation
     end,
+    ?debugFmt("server.erl sending: ~p~n",[NewOp]),
     gen_server:cast(ps,{clientRequest,self(),Seq,NewOp}),
     receive
-        Message -> Message
+        Message -> ?debugFmt("server.erl got: ~p~n",[Message]), Message
     after
         1000 -> timeout
     end.

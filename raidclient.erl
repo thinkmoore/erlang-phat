@@ -2,7 +2,7 @@
 -behavior(gen_server).
 %-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,init/1,handle_call/3,call/1]).
+-export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2,test/0]).
 
 start_link(Nodes) ->
     gen_server:start_link({local,raid},raidclient,Nodes,[]).
@@ -13,6 +13,18 @@ init(Nodes) ->
 
 call(Operation) ->
     gen_server:call(raid,Operation).
+
+%% Server teardown
+terminate(Reason,_) ->
+    io:fwrite("Raid client terminating! Reason: ~p~n", [Reason]).
+stop() ->
+    gen_server:cast(raid, stop).
+
+%% Unimplemented call backs
+handle_cast(stop, State) ->
+    {stop, normal, State};
+handle_cast(_,_) ->
+    {error,async_unsupported}.
 
 do_split_binary(Size, B) when byte_size(B) >= Size->
     {Chunk, Rest} = split_binary(B, Size),
@@ -59,3 +71,9 @@ handle_call({get},_,State = #{ chunks := G}) ->
     io:fwrite("~p~n", [binary_to_list(Data)]),
     Check = xor_all(Parts),
     {reply, Data, State}.
+
+% c(raidclient),raidclient:test().
+test() ->
+    raidclient:start_link([n1@localhost,n2@localhost,n3@localhost]),
+    client:call({getroot}).
+    
