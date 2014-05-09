@@ -4,3 +4,4 @@ workspace
 erl_crash.dump
 tests
 .#*
+*~

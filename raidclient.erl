@@ -2,7 +2,7 @@
 -behavior(gen_server).
 %-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2,test/0]).
+-export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
 
 start_link(Nodes) ->
     gen_server:start_link({local,raid},raidclient,Nodes,[]).
@@ -41,14 +41,14 @@ xor_all([H|Rest]) ->
     list_to_binary([X bxor Y || X <- binary_to_list(XorRest), Y <- binary_to_list(H)]).    
 
 binary_to_chunks(B,G) ->
-    Size = byte_size(B) div (G-1),
+    Size = byte_size(B) div G,
     Splits = do_split_binary(Size, B),
     Xor = xor_all(Splits),
     [Xor|Splits].
 
 do_chunk(Chunk,Num) ->
     client:call({mkfile,{handle,[]},[Num],""}),
-    client:call({putconents,{handle,[Num]},Chunk}),
+    client:call({putcontents,{handle,[Num]},Chunk}),
     Num + 1.
 
 get_chunk(Num) ->
@@ -65,15 +65,10 @@ handle_call({store,Data},_,State = #{ chunks := G}) ->
     lists:foldl(fun do_chunk/2, 0, Parts),
     {reply, done, State};
 handle_call({get},_,State = #{ chunks := G}) ->
-    [Check|Parts] = lists:reverse(get_chunks(G-1)),
+    [Check|Parts] = lists:reverse(get_chunks(G)),
     io:fwrite("~p~n", [[Check|Parts]]),
     Data = lists:foldl(fun (E,Acc) -> << Acc/binary, E/binary >> end, <<>>, Parts),
     io:fwrite("~p~n", [binary_to_list(Data)]),
     Check = xor_all(Parts),
     {reply, Data, State}.
-
-% c(raidclient),raidclient:test().
-test() ->
-    raidclient:start_link([n1@localhost,n2@localhost,n3@localhost]),
-    client:call({getroot}).
     

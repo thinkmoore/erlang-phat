@@ -53,7 +53,12 @@ start_link() ->
     gen_server:start_link({local, fs}, fs, [], []).
 init(_) ->
     io:fwrite("Starting fileystem on ~p~n", [node()]),
-    {ok,dict:store([],{dir, #{read => {0, 0, {0,0,0}}, write => {0, unlocked}}, []},dict:new())}.
+    Fresh = fresh(),
+    {ok,Fresh}.
+
+fresh() ->
+    dict:store([],{dir, #{read => {0, 0, {0,0,0}}, write => {0, unlocked}}, []},dict:new()).
+    
 
 %% Server teardown
 terminate(Reason,_) ->
@@ -113,8 +118,9 @@ handle_call({remove,Handle},_,State) ->
     {reply,Resp,NewState};
 handle_call({dump},_,State) ->
     {reply,{ok,State},State};
-handle_call({clear},_,State) ->
-    {reply,init(foo),State};
+handle_call({clear},_,_) ->
+    Fresh = fresh(),
+    {reply,{ok,clear},Fresh};
 handle_call(OpName,_,State) ->
     {reply, {error, {illegal_fs_operation, OpName}}, State}.
 
