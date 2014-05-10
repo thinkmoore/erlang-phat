@@ -3,7 +3,7 @@
 %-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
--export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2]).
+-export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2,store_chunk/5,get_chunk/4]).
 
 % want Nodes to a list where each element is all the nodes for a single VR cluster
 start_link(Clusters) ->
@@ -64,41 +64,58 @@ binary_to_chunks(B,G) ->
     Xor = xor_all(Splits),
     [Xor|Splits].
 
-do_chunk(Client,Chunk,Name,Num) ->
+store_chunk(Client,Chunk,Name,Num,Pid) ->
     client:call(Client,{mkfile,{handle,[]},[Name, Num],""}),
-    client:call(Client,{putcontents,{handle,[Name, Num]},Chunk}).
+    Resp = client:call(Client,{putcontents,{handle,[Name, Num]},Chunk}),
+    Pid ! Resp.
 
-do_chunks(Clients,Chunks,TotalNum,Name) ->
+store_chunks(Clients,Chunks,TotalNum,Name) ->
     lists:zipwith3(fun (Client, Chunk, Num) ->
-			  do_chunk(Client,Chunk,Name,Num) end, 
-		          Clients, Chunks, lists:seq(0, TotalNum - 1)).
+			  spawn(raidclient, store_chunk, [Client,Chunk,Name,Num,self()]) end, 
+		          Clients, Chunks, lists:seq(0, TotalNum - 1)),
+    wait_for_store(TotalNum, 0).
+
+wait_for_store(TotalNum, TotalNum) ->
+    {ok};
+wait_for_store(TotalNum, Received) when Received < TotalNum ->
+    receive
+	ok ->
+	    wait_for_store(TotalNum, Received + 1);
+	Resp ->
+	    io:fwrite("Resp ~p~n",[Resp])
+		
+    %% after
+    %% 	1000 ->
+    %% 	    terminate("timeout waiting for store chunks",{})
+    end.
 
 get_chunk(Client, Name, Num, Pid) ->
     Block = client:call(Client, {getcontents,{handle,[Name,Num]}}),
     Pid ! {Block, Num}.
 
 get_chunks(Clients,TotalNum,Name) ->
-    lists:map(fun ({Client,Num}) -> spawn(raidclient, get_chunk2, [Client,Name,Num,self()]) end,
-	      zip(Clients, lists:seq(0, TotalNum - 1))),
+    lists:map(fun ({Client,Num}) -> spawn(raidclient, get_chunk, [Client,Name,Num,self()]) end,
+	      lists:zip(Clients, lists:seq(0, TotalNum - 1))),
     wait_for_chunks(TotalNum, 0, []).
 
 wait_for_chunks(TotalNum, TotalNum, Acc) ->
     lists:map(fun ({B,_}) -> B end, lists:keysort(2,Acc));
-wait_for_chunks(TotalNum, Received, Acc) where Received < TotalNum ->
+wait_for_chunks(TotalNum, Received, Acc) when Received < TotalNum ->
     receive
 	{Block, N} ->
 	    wait_for_chunks(TotalNum, Received + 1, [{Block,N}|Acc])
-    after
-	1000 ->
-	    terminate("timeout waiting for chunks",{})
+    %% after
+    %% 	1000 ->
+    %% 	    terminate("timeout waiting for get chunks", {})
     end.
 
 handle_call({store,Name,Data},_,State = #{ clients := Clients, numchunks := N}) ->
     Binary = binary:list_to_bin(Data),
     Chunks = binary_to_chunks(Binary,N),
     io:fwrite("chunks: ~p~n", [Chunks]),
-    do_chunks(Clients, Chunks, N, Name),
-    {reply, done, State};
+    Store = store_chunks(Clients, Chunks, N, Name),
+    io:fwrite("stored: ~p~n", [Store]),
+    {reply, Store, State};
 handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) ->
     %[Check|Chunks] = lists:reverse(get_chunks(Clients,Name)),
     [Check|Chunks] = get_chunks(Clients,TotalNum,Name),

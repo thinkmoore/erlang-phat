@@ -5,7 +5,7 @@
 -export([code_change/4,handle_info/3,handle_sync_event/4]).
 -export([testOldValue/2,testTwoCommits/2,testMasterFailover/5,testRecovery/3,testCyclePrimary/3]).
 -behavior(gen_fsm).
--define(NODEBUG, true). %% comment out for debugging messages
+%-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
