@@ -2,7 +2,7 @@
 -behavior(gen_server).
 %-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,init/1,handle_call/3,call/1,start/0,stop/0,terminate/2,handle_cast/2,handle_info/2,code_change/3]).
+-export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,handle_cast/2,handle_info/2,code_change/3]).
 
 %% State is {master => MasterNode, alternates => Nodes, seq => SequenceNumber}
 
@@ -28,11 +28,18 @@ handle_info(_,_) ->
 start_link(Nodes) ->
     gen_server:start_link({local,client},client,Nodes,[]).
 
+start_link(Nodes,Name) ->
+    ?debugFmt("starting: ~p with ~p ~n",[Name,Nodes]),
+    gen_server:start_link({local,Name},client,Nodes,[]).
+
 init([Master|Rest]) ->
     {ok, #{master => Master, alternates => [Master|Rest], seq => 0}}.
 
 call(Operation) ->
     gen_server:call(client,Operation).
+
+call(Name, Operation) ->
+    gen_server:call(Name,Operation).
 
 nextMaster(Master,[Master,Next|_],_) ->
     Next;
