@@ -391,10 +391,11 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
 
 processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, 
     #{ timeout := Timeout } = State) ->
-    NewState = processBuffer(State#{ prepareBuffer := NewPrepareBuffer }, 
+    AfterBuffer = processBuffer(State#{ prepareBuffer := NewPrepareBuffer }, 
         NewPrepareBuffer, MasterCommitNumber),
+    AfterLog = processLog(AfterBuffer, MasterCommitNumber),
     #{  masterNode := MasterNode,  viewNumber := ViewNumber,
-        commitNumber := CommitNumber, myNode := MyNode } = NewState,
+        commitNumber := CommitNumber, myNode := MyNode } = AfterLog,
     if
         CommitNumber < MasterCommitNumber ->
             % todo send getstate
@@ -403,40 +404,45 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
         true ->
             ?debugFmt("replica completed up to K=~p,O=~p~n", [CommitNumber, OpNumber]),
             sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode}),
-            {next_state, replica, NewState, Timeout}
+            {next_state, replica, AfterLog, Timeout}
     end.
 
 processBuffer(State, [], _) -> State;
-processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber, 
-    commitFn := CommitFn, log := Log } = State, 
+processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber, log := Log } = State, 
     Buffer, MasterCommitNumber) ->
     {[{OpNumber, Op, Client, RequestNum}], Rest} = lists:split(1, Buffer),
-    ?debugFmt("processing ~p~n", [OpNumber]),
+    ?debugFmt("processing ~p, global op number ~p~n", [OpNumber,GlobalOpNumber]),
     if
         OpNumber + 1 < GlobalOpNumber ->
-            ?debugFmt("Gap, don't process~n", []),
+            ?debugFmt("Out of order message~nBuffer: ~p~nLog: ~p~n", [Buffer,Log]),
             State;
-        OpNumber =< MasterCommitNumber ->
-            ?debugFmt("committing ~p on replica~n", [OpNumber]),
-            Result = case CommitFn(Client, Op, replica) of
-                {reply, Res} ->
-                    Res;
-                _ ->
-                    unknown
-            end,
-            NewClientsTable = dict:store(Client, {RequestNum, Result}, ClientsTable),
-            processBuffer(State#{ commitNumber :=  OpNumber, 
-                prepareBuffer := Rest, clientsTable := NewClientsTable }, 
-                Rest, MasterCommitNumber);
         OpNumber == GlobalOpNumber + 1 ->
             ?debugFmt("adding ~p to replica log~n", [OpNumber]),
             NewClientsTable = dict:store(Client, {RequestNum, inProgress}, ClientsTable),
             NewLog = [{OpNumber, Op, Client, RequestNum}|Log],
-            processBuffer(State#{ log := NewLog, opNumber := OpNumber, 
-                clientsTable := NewClientsTable }, Rest, MasterCommitNumber);
+            processBuffer(State#{ log := NewLog, opNumber := OpNumber,
+				  prepareBuffer := Rest, clientsTable := NewClientsTable },
+			  Rest, MasterCommitNumber);
         true ->
             processBuffer(State, Rest, MasterCommitNumber)
     end.
+
+processCommit({N,Op,Client,RequestNum},{CommitFn,OldClientsTable}) ->
+    ?debugFmt("committing ~p on replica~n", [N]),
+    Result = case CommitFn(Client, Op, replica) of
+		 {reply, Res} ->
+		     Res;
+		 _ ->
+		     unknown
+	     end,
+    {CommitFn,dict:store(Client, {RequestNum, Result}, OldClientsTable)}.
+
+processLog(#{ clientsTable := ClientsTable, commitNumber := LastCommit,
+	      commitFn := CommitFn, log := Log } = State, MasterCommitNumber) ->
+    ToCommit = lists:filter(fun ({N,_,_,_}) -> (N =< MasterCommitNumber) and (N > LastCommit) end, Log),
+    InOrder = lists:reverse(ToCommit),
+    {_,NewClientsTable} = lists:foldl(fun processCommit/2, {CommitFn,ClientsTable}, InOrder),
+    State#{ clientsTable := NewClientsTable, commitNumber := MasterCommitNumber }.
 
 startRecovery(#{myNode := MyNode, allNodes := AllNodes, timeout := Timeout} = State) ->
     ?debugFmt("node ~p starting recovery~n", [MyNode]),
