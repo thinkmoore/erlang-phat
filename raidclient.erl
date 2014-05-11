@@ -1,9 +1,10 @@
 -module(raidclient).
 -behavior(gen_server).
-%-define(NODEBUG, true). %% comment out for debugging messages
+-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
 -export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2,store_chunk/5,get_chunk/4]).
+-export([dotestloop/1,testloop/1]).
 
 % want Nodes to a list where each element is all the nodes for a single VR cluster
 start_link(Clusters) ->
@@ -82,11 +83,10 @@ wait_for_store(TotalNum, Received) when Received < TotalNum ->
 	ok ->
 	    wait_for_store(TotalNum, Received + 1);
 	Resp ->
-	    io:fwrite("Resp ~p~n",[Resp])
-		
-    %% after
-    %% 	1000 ->
-    %% 	    terminate("timeout waiting for store chunks",{})
+	    ?debugFmt("Resp ~p~n",[Resp])
+    after
+     	10000 ->
+     	    terminate("timeout waiting for store chunks",{})
     end.
 
 get_chunk(Client, Name, Num, Pid) ->
@@ -104,17 +104,17 @@ wait_for_chunks(TotalNum, Received, Acc) when Received < TotalNum ->
     receive
 	{Block, N} ->
 	    wait_for_chunks(TotalNum, Received + 1, [{Block,N}|Acc])
-    %% after
-    %% 	1000 ->
-    %% 	    terminate("timeout waiting for get chunks", {})
+    after
+     	10000 ->
+     	    terminate("timeout waiting for get chunks", {})
     end.
 
 handle_call({store,Name,Data},_,State = #{ clients := Clients, numchunks := N}) ->
     Binary = binary:list_to_bin(Data),
     Chunks = binary_to_chunks(Binary,N),
-    io:fwrite("chunks: ~p~n", [Chunks]),
+    ?debugFmt("chunks: ~p~n", [Chunks]),
     Store = store_chunks(Clients, Chunks, N, Name),
-    io:fwrite("stored: ~p~n", [Store]),
+    ?debugFmt("stored: ~p~n", [Store]),
     {reply, Store, State};
 handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) ->
     %[Check|Chunks] = lists:reverse(get_chunks(Clients,Name)),
@@ -125,7 +125,8 @@ handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) 
     Check1 = xor_all(Chunks),
     if 
 	Check =:= Check1 ->
-	    io:fwrite("~p~n", ["Parity check passes!"]);
+	    ?debugFmt("~p~n", ["Parity check passes!"]),
+	    ok;
 	true -> 
 	    io:fwrite("~p~n", ["Parity check failed!"])
     end,
@@ -133,3 +134,16 @@ handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) 
 handle_call({stop},_,State = #{ clients := Clients}) ->
     lists:map(fun (Client) -> gen_server:cast(Client,stop) end, Clients),
     {reply, stopped, State}.   
+
+test() ->
+    Store = raidclient:call({store,"name1","abcdefghijklmnopqrstuvwxyz"}),
+    Get = raidclient:call({get,"name1"}).
+
+testloop(0) ->
+    ok;
+testloop(N) ->
+    test(),
+    testloop(N-1).
+
+dotestloop(N) ->
+    timer:tc(raidclient, testloop, [N]).

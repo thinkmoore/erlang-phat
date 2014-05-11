@@ -1,6 +1,6 @@
 -module(client).
 -behavior(gen_server).
-%-define(NODEBUG, true). %% comment out for debugging messages
+-define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,handle_cast/2,handle_info/2,code_change/3]).
 
