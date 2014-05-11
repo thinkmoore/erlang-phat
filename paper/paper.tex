@@ -1,0 +1,119 @@
+\documentclass[10pt,letter]{article}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+% packages that allow mathematical formatting
+
+\usepackage{graphicx}
+% package that allows you to include graphics
+
+\usepackage{setspace}
+% package that allows you to change spacing
+
+\usepackage{algpseudocode}
+\usepackage{algorithmicx}
+\usepackage{algorithm}
+
+\usepackage[sc,osf]{mathpazo}
+\linespread{1.05}         % Palatino needs more leading (space between lines)
+\usepackage[T1]{fontenc}
+
+\fontencoding{T1}
+\fontfamily{ppl}
+\fontseries{m}
+\fontshape{n}
+\fontsize{10}{13}
+% Set font size. The first parameter is the font size to switch to; the second
+% is the \baselineskip to use. The unit of both parameters defaults to pt. A
+% rule of thumb is that the baselineskip should be 1.2 times the font size.
+\selectfont
+
+\usepackage{parskip}
+% Use the style of having no indentation with a space between paragraphs.
+
+\usepackage{enumitem}
+% Resume an enumerated list, continuing the old numbering, after some
+% intervening text.
+
+% \usepackage{fullpage}
+% package that specifies normal margins
+
+\usepackage{titling}
+\setlength{\droptitle}{-5em}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Macros
+
+\newcommand{\chubby}[0]{\textsc{Chubby}}
+\newcommand{\phat}[0]{\textsc{Phat}}
+\newcommand{\phatraid}[0]{\textsc{PhatRaid}}
+\newcommand{\raid}[1]{\textsc{RAID #1}}
+\newcommand{\paxos}[0]{\textsc{Paxos}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+\title{PHAT RAID, yo}
+\author{Andrew Johnson \and Daniel King \and Lucas Waye \and Scott Moore}
+\date{May 13, 2014}
+
+\maketitle
+
+Distributed file stores, like Google's \chubby{} and CS260r's \phat{}, send all
+files through a single master node which consistently replicates the file on
+many slaves. In this scheme, the master node's throughput is a bottleneck for
+storing large files. We present \phatraid{} which mitigates this bottleneck by
+partitioning files across many \paxos{} groups which form a \raid{1} group.
+
+\section{Introduction}
+
+\section{Implementation}
+
+\phatraid{} is implemented in Erlang, reusing our previous implementation of
+\phat{}. The implementation is divided into three domains: the server cluster,
+the client, and the raid-client. The server code implements a VR-like consensus
+algorithm as well as simple file system. The client code exposes a file system
+API which hides the communication bookkeeping. The raid-client provides a file
+system API which transparently partitions files and reassembles them as they are
+sent and received from the server cluster.
+
+In Erlang, the basic unit of concurrency is a \emph{process} and an Erlang VM is
+known as a \emph{node}. A process may communicate with other processes on its
+node as well as processes on other nodes. Multiple nodes may be on the same
+machine or distributed across many machines.
+
+The server cluster is implemented as a collection of nodes running the same
+server code. One of these nodes is designated the master node. The other nodes
+are known as replicas.
+
+The master and each replica has four components: the supervisor, the
+(unfortunately named) server, VR, and the file system.
+
+\begin{itemize}
+\item the supervisor -- if any of the other three processes dies, it shuts all
+  of them down and restarts all of them
+\item the server -- if the node is the master, it passes messages on to VR; if
+  the node is a replica, it redirects clients to the master
+\item VR -- maintains a log of opaque messages, achieving consensus with other
+  nodes in the cluster via the Viewstamped Replication protocol
+\item the file system -- a simple hierarchical file system with locks
+\end{itemize}
+
+Each of these are implemented using Erlang behaviors. An Erlang behavior is a
+framework which implements common patterns like servers and finite state
+machines. In particular, the supervisor uses the \texttt{supervisor} behavior,
+the server and file system both use the \texttt{gen\_server} behavior, and VR
+uses the \texttt{gen\_fsm} behavior.
+
+The \texttt{supervisor} behavior simply provides a framework for restarting failed
+processes.
+
+The \texttt{gen\_server} behavior provides a framework
+
+\section{Performance}
+
+\section{Conclusion}
+
+\end{document}
