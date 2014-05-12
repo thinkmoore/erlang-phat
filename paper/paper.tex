@@ -15,7 +15,7 @@
 \usepackage{algorithm}
 
 \usepackage[sc,osf]{mathpazo}
-\linespread{1.05}         % Palatino needs more leading (space between lines)
+\linespread{1.05}         % Palatino needs more leading
 \usepackage[T1]{fontenc}
 
 \fontencoding{T1}
@@ -107,10 +107,24 @@ machines. In particular, the supervisor uses the \texttt{supervisor} behavior,
 the server and file system both use the \texttt{gen\_server} behavior, and VR
 uses the \texttt{gen\_fsm} behavior.
 
-The \texttt{supervisor} behavior simply provides a framework for restarting failed
-processes.
+\begin{itemize}
+\item The \texttt{supervisor} behavior provides a framework for restarting
+  failed processes.
+\item The \texttt{gen\_server} behavior provides a framework for many-client
+  single-server interactions. We implemented functions to process messages
+  formatted as Erlang tuples. The \texttt{gen\_server} behavior handles
+  low-level socket interaction.
+\item The \texttt{gen\_fsm} behavior generalizes the \texttt{gen\_server}
+  behavior by permitting the server to have a finite number of states. Each
+  state has a set of functions with which to process messages. This behavior can
+  be seen as an ad hoc polymorphic variant of the \texttt{gen\_server} behavior.
+\end{itemize}
 
-The \texttt{gen\_server} behavior provides a framework
+Additionally, the \texttt{gen\_server} and \texttt{gen\_fsm} behaviors allow
+the programmer to specify an arbitrary state value which will be passed around
+\`{a} la functional reactive programming.
+
+
 
 \section{Performance}
 
