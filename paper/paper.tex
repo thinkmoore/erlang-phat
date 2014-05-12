@@ -10,6 +10,9 @@
 \usepackage{setspace}
 % package that allows you to change spacing
 
+\usepackage{cite}
+% for BibTeX
+
 \usepackage{algpseudocode}
 \usepackage{algorithmicx}
 \usepackage{algorithm}
@@ -42,6 +45,7 @@
 % move the title up a bit, wastes less space
 \setlength{\droptitle}{-5em}
 
+
 \usepackage[usenames,dvipsnames]{color}
 % for \color used in listings
 \usepackage{textcomp}
@@ -70,6 +74,9 @@
 }
 \lstloadlanguages{erlang}
 \lstset{language=erlang}
+
+\usepackage{tikz}
+\usetikzlibrary{graphdrawing}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Macros
@@ -100,6 +107,8 @@ partitioning files across many \paxos{} groups which form a \raid{1} group.
 
 \section{Implementation}
 
+\subsection{System Organization}
+
 \phatraid{} is implemented in Erlang, reusing our previous implementation of
 \phat{}. The implementation is divided into three domains: the server cluster,
 the client, and the raid-client. The server code implements a VR-like consensus
@@ -107,6 +116,10 @@ algorithm as well as simple file system. The client code exposes a file system
 API which hides the communication bookkeeping. The raid-client provides a file
 system API which transparently partitions files and reassembles them as they are
 sent and received from the server cluster.
+
+
+
+\subsection{Erlang and Behaviors}
 
 In Erlang, the basic unit of concurrency is a \emph{process} and an Erlang VM is
 known as a \emph{node}. A process may communicate with other processes on its
@@ -130,8 +143,8 @@ The master and each replica has four components: the supervisor, the
 \item the file system -- a simple hierarchical file system with locks
 \end{itemize}
 
-Each of these are implemented using Erlang behaviors. An Erlang behavior is a
-framework which implements common patterns like servers and finite state
+The four components are implemented using Erlang behaviors. An Erlang behavior
+is a framework which implements common patterns like servers and finite state
 machines. In particular, the supervisor uses the \texttt{supervisor} behavior,
 the server and file system both use the \texttt{gen\_server} behavior, and VR
 uses the \texttt{gen\_fsm} behavior.
@@ -153,20 +166,23 @@ Additionally, the \texttt{gen\_server} and \texttt{gen\_fsm} behaviors allow
 the programmer to specify an arbitrary state value which will be passed around
 \`{a} la functional reactive programming.
 
+\subsubsection{The \texttt{supervisor} Behavior}
+
 \lstinputlisting[firstline=6,lastline=18,float,
-                 caption=Supervisor Behavior --- \texttt{phat.erl},label=supervisor,
+                 caption=The \texttt{supervisor} Behavior --- \texttt{phat.erl},
+                 label=lst:supervisor,
                  numbers=left, firstnumber=6]
                 {../phat.erl}
 
-Listing \ref{supervisor} is taken from our supervisor code. When a supervisor is
-started, the \texttt{supervisor} behavior looks for a unary procedure called
-\lstinline!init!. The \lstinline!init! procedure returns a child specification which
-is a pair of a restart specification and a list of children. In Listing
-\ref{supervisor}, the restart specification, \lstinline!{one_for_all,1,5}!
-specifies that if any one node dies, all nodes should be restarted, unless more
-than one failure has occurred in the past five seconds. If more than one failure
-occurs in five seconds, the supervisor kills all the children and shuts itself
-down as well.
+Listing \ref{lst:supervisor} is taken from our supervisor code. When a
+supervisor is started, the \texttt{supervisor} behavior looks for a unary
+procedure called \lstinline!init!. The \lstinline!init! procedure returns a
+child specification which is a pair of a restart specification and a list of
+children. In Listing \ref{lst:supervisor}, the restart specification,
+\lstinline!{one_for_all,1,5}! specifies that if any one node dies, all nodes
+should be restarted, unless more than one failure has occurred in the past five
+seconds. If more than one failure occurs in five seconds, the supervisor kills
+all the children and shuts itself down as well.
 
 Each child in the list of children is a 6-tuple consisting of: child name,
 initial procedure call, child transience, shutdown style, child type, necessary
@@ -186,11 +202,130 @@ modules.
   modules.
 \end{itemize}
 
+\subsubsection{The \texttt{gen\_fsm} Behavior}
 
+\begin{lstlisting}[float,caption=The \texttt{gen\_fsm} Behavior --- \texttt{vr.erl},
+                   label=lst:genfsm, numbers=left, firstnumber=176]
+replica( {prepare, MasterViewNumber, _, _, _, _, _}
+       , State = #{ viewNumber := ViewNumber})
+    when MasterViewNumber > ViewNumber ->
+    ?debugFmt("my view is out of date, need to recover~n", []),
+    startRecovery(State);
 
+replica( {prepare, MasterViewNumber, _, _, _, _, _}
+       , State = #{ timeout := Timeout, viewNumber := ViewNumber})
+    when MasterViewNumber < ViewNumber ->
+    ?debugFmt("ignoring prepare from old view~n", []),
+    {next_state, replica, State, Timeout};
+
+replica( { prepare, _, Op, OpNumber
+         , MasterCommitNumber, Client, RequestNum}
+       , State = #{ prepareBuffer := PrepareBuffer }) ->
+    Message = {OpNumber, Op, Client, RequestNum},
+    NewPrepareBuffer = lists:sort([Message|PrepareBuffer]),
+    processPrepareOrCommit( OpNumber
+                          , MasterCommitNumber
+                          , NewPrepareBuffer
+                          , State
+                          );
+\end{lstlisting}
+
+\begin{lstlisting}[float,caption={Processing the VR Message Queue, Part 1 --- \texttt{vr.erl}},
+                   label=lst:processing1, numbers=left, firstnumber=375]
+processPrepareOrCommit( OpNumber, MasterCommitNumber, NewPrepareBuffer
+                      , State = #{ timeout := Timeout
+                                 , commitNumber := CommitNumber
+                                 , masterNode := MasterNode
+                                 , myNode := MyNode
+                                 , viewNumber := ViewNumber
+                                 , allNodes := Nodes})
+  when CommitNumber > MasterCommitNumber ->
+    NewViewNumber = ViewNumber + 1,
+    NewMaster = chooseMaster(State, NewViewNumber),
+    sendToReplicas( MasterNode
+                  , Nodes
+                  , {startViewChange, NewViewNumber, MyNode}
+                  ),
+    { next_state
+    , viewChange
+    , State#{ viewNumber := NewViewNumbern
+            , masterNode := NewMaster }
+    , Timeout
+    };
+\end{lstlisting}
+\begin{lstlisting}[float,caption={Processing the VR Message Queue, Part 2 --- \texttt{vr.erl}},
+                   label=lst:processing2, numbers=left, firstnumber=397]
+processPrepareOrCommit( OpNumber, MasterCommitNumber, NewPrepareBuffer
+                      , #{ timeout := Timeout } = State) ->
+    AfterBuffer =
+      processBuffer( State#{ prepareBuffer := NewPrepareBuffer }
+                   , NewPrepareBuffer
+                   , MasterCommitNumber
+                   ),
+    AfterLog = processLog(AfterBuffer, MasterCommitNumber),
+    #{ masterNode := MasterNode
+     , viewNumber := ViewNumber
+     , commitNumber := CommitNumber
+     , myNode := MyNode } = AfterLog,
+    if
+        CommitNumber < MasterCommitNumber ->
+            startRecovery(State);
+        true ->
+            sendToMaster( MasterNode
+                        , {prepareOk, ViewNumber, OpNumber, MyNode}
+                        ),
+            {next_state, replica, AfterLog, Timeout}
+    end.
+\end{lstlisting}
+
+A state in the \texttt{gen\_fsm} behavior manifests as a procedure which accepts
+two arguments: the incoming message and the store\footnote{Mutable state is
+  implemented as a pure store value which is passed around by the behavior}. The
+return value of a state-procedure is usually the 4-tuple
+\lstinline!{next_state,NextState,NewStore,Timeout}!. The \texttt{gen\_fsm}
+behavior will transition to \lstinline!NextState! and set the store to
+\lstinline!NewStore!. When a new message is received the \texttt{gen\_fsm}
+behavior will invoke the \lstinline!NextState! procedure with the new message
+and the \lstinline!NewStore!.
+
+We implemented Viewstamped Replication\cite{liskov2012viewstamped} to achieve
+consensus in the file system. Listing \ref{lst:genfsm} defines how to handle
+prepare messages sent to a node in the replica state. It is piecewise defined by
+pattern matching on the arguments. The first two definition clauses use the
+\lstinline!when! keyword to specify arbitrary, required relationships between
+the matched variables.
+
+The final definition clause triggers when the replica receives a message in the
+current view. The replica adds the message to a sorted queue and calls a
+processing procedure. The processing procedure is defined separately in Listing
+\ref{lst:processing1} and Listing \ref{lst:processing2}.
+
+Listing \ref{lst:processing1} handles a message from an out-of-date master,
+i.e., his commit number is older than the replica's commit number. The replica
+first proposes a view change to the cluster. Afterwards, it changes its
+\texttt{gen\_fsm} state to \lstinline!viewChange! and updates the
+store\footnote{The store is called \lstinline!State! in the listings} with the
+new view number and the new master.
+
+Listing \ref{lst:processing2} handles messages from the current master. The
+\lstinline!prepareBuffer! stores prepare messages that arrived out of order. In
+particular, if the log ends at operation number $n$ and message $n+1$ is dropped
+by the network, all subsequent messages will be buffered. The buffered messages
+will not be added to the log until message $n+1$ is received. The call to
+\lstinline!processBuffer! moves messages to the log, if all previous messages
+have now been received. The call to \lstinline!processLog! commits new messages
+in the log which have been committed by the master node. Lines 405 to 408
+destructure \lstinline!AfterLog! and bind variables for later use. The final
+\lstinline!if! statement responds to the master unless the master has committed
+messages we haven't received.\footnote{This can happen if the network drops a message whose
+  operation number lies between the replica's last commit number and the
+  master's last commit number.}
 
 \section{Performance}
 
 \section{Conclusion}
+
+\bibliographystyle{plain}
+\bibliography{paper}
 
 \end{document}
