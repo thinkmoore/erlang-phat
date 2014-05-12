@@ -83,7 +83,7 @@ wait_for_store(TotalNum, Received) when Received < TotalNum ->
 	ok ->
 	    wait_for_store(TotalNum, Received + 1);
 	Resp ->
-	    ?debugFmt("Resp ~p~n",[Resp])
+     	    terminate("Didn't receive ok from a store",{Resp})
     after
      	10000 ->
      	    terminate("timeout waiting for store chunks",{})
