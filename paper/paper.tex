@@ -39,8 +39,37 @@
 % package that specifies normal margins
 
 \usepackage{titling}
+% move the title up a bit, wastes less space
 \setlength{\droptitle}{-5em}
 
+\usepackage[usenames,dvipsnames]{color}
+% for \color used in listings
+\usepackage{textcomp}
+% for upquote used in listings
+\usepackage{listings}
+\lstset{
+    breakatwhitespace, % somehow prevents lstinline from line splitting
+    tabsize=2,
+    rulecolor=,
+    basicstyle=\footnotesize,
+    upquote=true,
+    aboveskip={1.5\baselineskip},
+    columns=fixed,
+    extendedchars=true,
+    breaklines=true,
+    prebreak = \raisebox{0ex}[0ex][0ex]{\ensuremath{\hookleftarrow}},
+    frame=single,
+    showtabs=false,
+    showspaces=false,
+    showstringspaces=false,
+    keywordstyle=\color{Purple},
+    identifierstyle=\color{Black},
+    commentstyle=\color{BrickRed},
+    stringstyle=\color{RubineRed},
+    captionpos=b,
+}
+\lstloadlanguages{erlang}
+\lstset{language=erlang}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Macros
@@ -123,6 +152,40 @@ uses the \texttt{gen\_fsm} behavior.
 Additionally, the \texttt{gen\_server} and \texttt{gen\_fsm} behaviors allow
 the programmer to specify an arbitrary state value which will be passed around
 \`{a} la functional reactive programming.
+
+\lstinputlisting[firstline=6,lastline=18,float,
+                 caption=Supervisor Behavior --- \texttt{phat.erl},label=supervisor,
+                 numbers=left, firstnumber=6]
+                {../phat.erl}
+
+Listing \ref{supervisor} is taken from our supervisor code. When a supervisor is
+started, the \texttt{supervisor} behavior looks for a unary procedure called
+\lstinline!init!. The \lstinline!init! procedure returns a child specification which
+is a pair of a restart specification and a list of children. In Listing
+\ref{supervisor}, the restart specification, \lstinline!{one_for_all,1,5}!
+specifies that if any one node dies, all nodes should be restarted, unless more
+than one failure has occurred in the past five seconds. If more than one failure
+occurs in five seconds, the supervisor kills all the children and shuts itself
+down as well.
+
+Each child in the list of children is a 6-tuple consisting of: child name,
+initial procedure call, child transience, shutdown style, child type, necessary
+modules.
+
+\begin{itemize}
+\item The initial procedure call is a 3-tuple of module, procedure name and
+  argument list.
+\item Every child's transience is specified as \lstinline!permanent!, meaning
+  they should be restarted.
+\item Every child has shutdown style \lstinline!1! meaning they will first be
+  asked to terminate and one second later they will be forcibly terminated.
+\item All of our children are workers, which are distinguished from
+  sub-supervisors.
+\item The necessary modules are dynamically loaded when the child processes is
+  initialized, there is a one-to-one mapping between our children and code
+  modules.
+\end{itemize}
+
 
 
 

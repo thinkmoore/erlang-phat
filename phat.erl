@@ -7,10 +7,15 @@ init([Master|Rest]) ->
     Node = node(),
     VRS = lists:map(fun (N) -> {vr,N} end, [Master|Rest]),
     {ok, {{one_for_all, 1, 5},
-          [{fs, {fs, start_link, []}, permanent, 1, worker, [fs]}
-          ,{ps, {server, start_link, []}, permanent, 1, worker, [server]}
-          ,{vr, {vr, startNode, [{vr,Node}, VRS, fun server:commit/3]},
-            permanent, 1, worker, [vr]}]}}.
+          [ { fs
+            , {fs, start_link, []}
+            , permanent, 1, worker, [fs]}
+          , { ps
+            , {server, start_link, []}
+            , permanent, 1, worker, [server]}
+          , { vr
+            , {vr, startNode, [{vr,Node}, VRS, fun server:commit/3]}
+            , permanent, 1, worker, [vr]}]}}.
 
 start_link(Nodes) ->
     supervisor:start_link({local, phat}, phat, Nodes).
