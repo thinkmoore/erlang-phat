@@ -142,14 +142,14 @@ handle_call(OpName,_,State) ->
 
 
 fswritedelay(Data) ->
-    WaitTime = length(Data) * (?MB_PER_CHAR / ?DISK_WRITE_THRUPUT_MB_S) + ?DISK_WRITE_ACCESS_TIME_S,
+    WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_WRITE_THRUPUT_MB_S) + ?DISK_WRITE_ACCESS_TIME_S,
     receive
     after
         trunc(WaitTime * 1000) -> ok
     end.
 
 fsreaddelay(Data) ->
-    WaitTime = length(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
+    WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
     receive
     after
         trunc(WaitTime * 1000) -> ok
