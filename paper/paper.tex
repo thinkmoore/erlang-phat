@@ -142,7 +142,7 @@ In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) we
 \label{fig:hdd-vs-sdd}
 \end{figure}
 
-Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SSD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SSDs do not exhibit this problem as there is no spinning platter. The right diagram in \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk. Additionally, HDDs have difficultly with random accesses as the drive may need to wait for the drive head to be directly over the correct position on the platter. This problem becomes especially apparent when an individual file is fragmented into multiple blocks by the file system. SSDs have relatively better random access times, in general, though sequential access tends to be many times faster than random access \cite{disk-perf}. HDD performance can also can suffer from {\em spin-up delay}, which happens as a result of a power-saving measure that stops spinning the disk during idle times.
+Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SSD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SSDs do not exhibit this problem as there is no spinning platter. The right diagram in \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk. Additionally, HDDs have difficultly with random accesses as the drive may need to wait for the drive head to be directly over the correct position on the platter. This problem becomes especially apparent when an individual file is fragmented into multiple blocks by the file system. SSDs have relatively better random access times, in general, than HDDs. Sequential access tends to be many times faster than random access for both SSDs and HDDs \cite{disk-perf}. HDD performance can also can suffer from {\em spin-up delay}, which happens as a result of a power-saving measure that stops spinning the disk during idle times.
 
 We decided that HDDs have far too much performance variability in order to be properly modeled. As a result, we instead chose to simulate the performance characteristics of SSDs as they have relatively constant access times regardless of sector position on the drive and also do not suffer from {\em spin-up delay}.
 
@@ -154,9 +154,9 @@ We decided that HDDs have far too much performance variability in order to be pr
 Sequential Write Speed  \hspace{7em} & 55.03 - 481.85 MB/sec \\ 
 Write Access Time & 0.03 - 0.32 ms \\ \hline
 Sequential Read Speed &  207.95 - 522.45 MB/sec \\
-Read Access Time & 0.03 - 0.22 ms
+Read Access Time & 0.03 - 0.22 ms \\ \hline
 \end{tabular}
-\caption[Solid State Performance]{Solid State Disk performance for middle 95\% of sold state drives tested in a benchmark. Benchmark available at Benchmark available at \hwbenchmark.}
+\caption[Solid State Performance]{Solid State Disk performance for middle 95\% of solid state drives tested in a benchmark. Benchmark available at Benchmark available at \hwbenchmark.}
 \label{fig:sdd-perf}
 \end{figure}
 
@@ -234,6 +234,10 @@ one \phat{} cluster, which has a master and a number of replicas.
 Each \phat{} cluster maintains a file system which is separate and distinct from
 the file systems of other \phat{} clusters. Generally, two phat clusters do not
 communicate.
+
+\subsection{Disk Emulation and Abstraction Layer}
+
+We developed a novel ``{\bf {\em Disk Emulation and Abstraction Layer}}'' (DEAL) to simulate SSD performance so they . 
 
 \subsection{RAIDing \phat{}}
 
