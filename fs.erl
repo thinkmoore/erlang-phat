@@ -9,6 +9,13 @@
 -export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1,checktimeout/2,forcelock/3,dontlock/1]).
 -export([dump/0,clear/0]).
 
+%% Disk latency simulation constants
+-define(MB_PER_CHAR, 10).
+-define(DISK_WRITE_THRUPUT_MB_S, 200.0).
+-define(DISK_WRITE_ACCESS_TIME_S, 0.03).
+-define(DISK_READ_THRUPUT_MB_S, 200.0).
+-define(DISK_READ_ACCESS_TIME_S, 0.03).
+
 %% Calls into the server
 getroot() ->
     gen_server:call(fs,{getroot}).
@@ -131,6 +138,24 @@ handle_call(OpName,_,State) ->
 %% Locks = {read={SeqNum,Count,Expiration}, write={SeqNum,Expiration} | {SeqNum,unlocked}}
 %% Sequencer = {type=read/write,path=Path,sequenceNum=monotonically increasing counter}
 
+%% FS hard disk delay simulator
+
+
+fswritedelay(Data) ->
+    WaitTime = length(Data) * (?MB_PER_CHAR / ?DISK_WRITE_THRUPUT_MB_S) + ?DISK_WRITE_ACCESS_TIME_S,
+    receive
+    after
+        trunc(WaitTime * 1000) -> ok
+    end.
+
+fsreaddelay(Data) ->
+    WaitTime = length(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
+    receive
+    after
+        trunc(WaitTime * 1000) -> ok
+    end.
+
+
 %% Functions that actually do stuff
 getroot(_) ->
     {ok,{handle, []}}.
@@ -214,6 +239,7 @@ readdir({handle,Path},State) ->
 getcontents({handle,Path},State) ->
     case dict:find(Path,State) of
 	{ok, {file, _, Data}} ->
+        fsreaddelay(Data),
 	    {ok, Data};
 	{ok, {dir,_,_}} ->
 	    {error, not_a_file};
@@ -222,6 +248,7 @@ getcontents({handle,Path},State) ->
     end.
 
 putcontents({handle,Path},Data,State) ->
+    fswritedelay(Data),
     case dict:find(Path,State) of
 	{ok, {file,LockState,_}} ->
 	    NewState = dict:store(Path,{file,LockState,Data},State),
