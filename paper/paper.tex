@@ -46,6 +46,9 @@
 % move the title up a bit, wastes less space
 \setlength{\droptitle}{-5em}
 
+\usepackage{caption}
+\usepackage{subcaption}
+% for subfigures
 
 \usepackage[usenames,dvipsnames]{color}
 % for \color used in listings
@@ -80,6 +83,7 @@
 \usetikzlibrary{backgrounds}
 \usetikzlibrary{fit}
 \usetikzlibrary{positioning}
+\usetikzlibrary{shapes.misc} % for cross shaped nodes
 
 \pgfdeclarelayer{b}
 \pgfdeclarelayer{f}
@@ -104,6 +108,7 @@
 \newcommand{\chubby}[0]{\textsc{Chubby}}
 \newcommand{\phat}[0]{\textsc{Phat}}
 \newcommand{\phatraid}[0]{\textsc{PhatRaid}}
+\newcommand{\phatraidcf}[2]{\textsc{PhatRaid}(#1,#2)}
 \newcommand{\raid}[1]{\textsc{RAID #1}}
 \newcommand{\paxos}[0]{\textsc{Paxos}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -157,34 +162,50 @@ Figure \ref{fig:sdd-perf} shows the performance for SSDs from a 2013 survey of c
 
 \section{Implementation}
 
+\subsection{Erlang Primer}
+
+\phatraid{} is implemented in Erlang. Erlang is a pure, functional language with
+extensive library support for distributed applications. Erlang has one unit of
+concurrency, the process, and one unit of distribution, the node. Each Erlang
+node consists of an arbitrary number of processes. Erlang nodes may live on the
+same machine or on different machines connected by a network. Every Erlang node
+is given a name by an Erlang name server. Erlang processes may communicate with
+any Erlang node which they can name. Erlang processes interact with one another
+by making RPC calls.
+
 \subsection{System Organization}
 
 \begin{figure}
+  \centering
   \begin{tikzpicture}
-    [->,scale=.8,]
-    \node [rectangle, draw, thick] (raidclient) at (0,2) {Raid Client};
-    \node [rectangle, draw, thick] (client1) at (-4,1) {Client 1};
-    \node [rectangle, draw, thick] (client2) at (0,0) {Client 2};
-    \node [rectangle, draw, thick] (client3) at (4,1) {Client 3};
-    \node [rectangle, draw, thick] (vr11) at (-7, -2) {Master};
-    \node [rectangle, draw, thick] (vr12) at (-5, -2) {Replica};
-    \node [rectangle, draw, thick] (vr13) at (-3, -2) {Replica};
-    \node [rectangle, draw, thick] (vr21) at (-2, -4) {Master};
-    \node [rectangle, draw, thick] (vr22) at (0, -4) {Replica};
-    \node [rectangle, draw, thick] (vr23) at (2, -4) {Replica};
-    \node [rectangle, draw, thick] (vr31) at (3, -2) {Master};
-    \node [rectangle, draw, thick] (vr32) at (5, -2) {Replica};
-    \node [rectangle, draw, thick] (vr33) at (7, -2) {Replica};
+    [<->,scale=.85,shorten <=2pt, shorten >=2pt,]
+    \node [rectangle, draw, thick, inner sep=5pt] (raidclient) at (0,2) {Raid Client};
+    \node [rectangle, draw, thick, inner sep=5pt] (client1) at (-4,1) {Client 1};
+    \node [rectangle, draw, thick, inner sep=5pt] (client2) at (0,0) {Client 2};
+    \node [rectangle, draw, thick, inner sep=5pt] (client3) at (4,1) {Client 3};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr11) at (-6, -2) {Replica};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr12) at (-4, -2) {Master};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr13) at (-2, -2) {Replica};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr21) at (-2, -4) {Replica};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr22) at (0, -4) {Master};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr23) at (2, -4) {Replica};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr31) at (2, -2) {Replica};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr32) at (4, -2) {Master};
+    \node [rectangle, draw, thick, inner sep=5pt] (vr33) at (6, -2) {Replica};
 
 
     \foreach \to in {client1, client2, client3}
-    \draw [thick] (raidclient) -- (\to);
-    \foreach \to in {vr11, vr12, vr13}
-    \draw [thick] (client1) -- (\to);
-    \foreach \to in {vr21, vr22, vr23}
-    \draw [thick] (client2) -- (\to);
-    \foreach \to in {vr31, vr32, vr33}
-    \draw [thick] (client3) -- (\to);
+      \draw [thick] (raidclient) -- (\to);
+    \draw [thick] (client1) -- (vr12);
+    \draw [thick] (client2) -- (vr22);
+    \draw [thick] (client3) -- (vr32);
+
+    % \foreach \to in {vr11, vr13}
+    %   \draw [thick] (vr12) -- (\to);
+    % \foreach \to in {vr21, vr23}
+    %   \draw [thick] (vr22) -- (\to);
+    % \foreach \to in {vr31, vr33}
+    %   \draw [thick] (vr32) -- (\to);
 
     \plate{clientnode}{(raidclient)(client1)(client2)(client3)}{Client Node}{}
     \plate{pc1}{(vr11)(vr12)(vr13)}{Phat Cluster \#1}{}
@@ -192,7 +213,7 @@ Figure \ref{fig:sdd-perf} shows the performance for SSDs from a 2013 survey of c
     \plate{pc3}{(vr31)(vr32)(vr33)}{Phat Cluster \#3}{}
 
   \end{tikzpicture}
-  \caption{Organizational Diagram}
+  \caption{A \phatraidcf{3}{1} Group}
   \label{fig:organization}
 \end{figure}
 
@@ -212,9 +233,19 @@ Each \phat{} cluster maintains a file system which is separate and distinct from
 the file systems of other \phat{} clusters. Generally, two phat clusters do not
 communicate.
 
-\subsection{Implenting RAID on \phat{}}
+\subsection{RAIDing \phat{}}
 
-\subsection{Erlang and Behaviors}
+A \phatraidcf{$C$}{$f$} implementation is parameterized by two numbers: $C$, the
+number of \phat{} clusters, and $f$, the \phat{} cluster failure threshold. A
+single \phat{} cluster contains $2f + 1$ nodes. A \phatraid{} group contains $C$
+clusters for a total of $C(2f+1)$ \phat{} nodes. A \phatraid{} group can be
+concurrently accessed by an arbitrary number of raid-clients.
+
+On a client node, the raid-client spawns $C$ client processes which each maintain
+a connection to one of the $C$ \phat{} clusters. All communications between the
+raid-client and a phat cluster go through the assigned client process.
+
+\subsection{Erlang Behaviors}
 
 In Erlang, the basic unit of concurrency is a \emph{process} and an Erlang VM is
 known as a \emph{node}. A process may communicate with other processes on its
@@ -399,8 +430,8 @@ Listing \ref{lst:processing1} handles a message from an out-of-date master,
 i.e., his commit number is older than the replica's commit number. The replica
 first proposes a view change to the cluster. Afterwards, it changes its
 \texttt{gen\_fsm} state to \lstinline!viewChange! and updates the
-store\footnote{The store is called \lstinline!State! in the listings} with the
-new view number and the new master.
+store\footnote{The store is called \lstinline!State! in the code listings} with
+the new view number and the new master.
 
 Listing \ref{lst:processing2} handles messages from the current master. The
 \lstinline!prepareBuffer! stores prepare messages that arrived out of order. In
@@ -416,7 +447,104 @@ messages we haven't received.\footnote{This can happen if the network drops a me
   operation number lies between the replica's last commit number and the
   master's last commit number.}
 
-\section{Performance}
+\section{Evaluation}
+
+\subsection{Resilience}
+
+We distinguish between two types of failure: cessation of progress and loss of
+data. In a VR cluster without persistent stores, data loss only occurs when all
+$2f+1$ nodes in the cluster fail. In a VR cluster, progress only ceases if $f+1$
+nodes are lost. In \phatraid{} the conditions for cessation of progress and loss
+of data are complicated by the combination of RAID and VR.
+
+\begin{figure}
+  \centering
+  \begin{subfigure}{0.4\textwidth}
+    \centering
+    \begin{tikzpicture}[<->,scale=.5,shorten <=2pt, shorten >=2pt,]
+      \foreach \x/\y in {1/1, 1/2, 1/3, 2/1, 2/2, 2/3, 3/1, 3/2, 3/3}
+        \node [circle, draw, thick] (pr\x\y) at (\x,-\y) {};
+      \foreach \x/\y in {3/1, 3/2, 3/3, 1/3, 2/3}
+        \node [strike out, draw=red, thick] (pr\x\y) at (\x,-\y) {};
+    \end{tikzpicture}
+    \caption{Progress, No Data Loss}
+    \label{fig:failures_allok}
+  \end{subfigure}
+~
+  \begin{subfigure}{0.4\textwidth}
+    \centering
+    \begin{tikzpicture}[<->,scale=.5,shorten <=2pt, shorten >=2pt,]
+      \foreach \x/\y in {1/1, 1/2, 1/3, 2/1, 2/2, 2/3, 3/1, 3/2, 3/3}
+        \node [circle, draw, thick] (pr\x\y) at (\x,-\y) {};
+      \foreach \x/\y in {1/1, 1/2, 2/1, 2/2}
+        \node [strike out, draw=red, thick] (pr\x\y) at (\x,-\y) {};
+    \end{tikzpicture}
+    \caption{No Progress, No Data Loss}
+    \label{fig:failures_noprogress}
+  \end{subfigure}
+\\\vspace{1em}
+  \begin{subfigure}{0.4\textwidth}
+    \centering
+    \begin{tikzpicture}[scale=.5,shorten <=2pt, shorten >=2pt,]
+      \node[rotate=25] (N) at (1.5,-1.5) {\textsc{Impossible!}};
+    \end{tikzpicture}
+    \caption{Progress, Data Loss}
+    \label{fig:failures_max}
+  \end{subfigure}
+~
+  \begin{subfigure}{0.4\textwidth}
+    \centering
+    \begin{tikzpicture}[<->,scale=.5,shorten <=2pt, shorten >=2pt,]
+      \foreach \x/\y in {1/1, 1/2, 1/3, 2/1, 2/2, 2/3, 3/1, 3/2, 3/3}
+        \node [circle, draw, thick] (pr\x\y) at (\x,-\y) {};
+      \foreach \x/\y in {1/1, 1/2, 1/3, 2/1, 2/2, 2/3}
+        \node [strike out, draw=red, thick] (pr\x\y) at (\x,-\y) {};
+    \end{tikzpicture}
+    \caption{No Progress, Data Loss}
+    \label{fig:failures_noprogress_nodata}
+  \end{subfigure}
+
+  \caption{Some Failed Node Distributions of \phatraidcf{3}{1}}
+  \label{fig:failures}
+\end{figure}
+
+Four distributions of failed nodes in \phatraidcf{3}{1} are depicted in Figure
+\ref{fig:failures}. In this section, if we claim ``data is lost'', we mean that
+if no persistent store is used, data will be lost. Adding a persistent store
+obviously prevents loss of committed data.
+
+The top left corner depicts five of the nine nodes failing. This state is
+\emph{not} a failure state. The group can still make progress and no data is
+lost. The two surviving clusters can reach consensus on new values and can
+reconstruct the failed cluster's data.
+
+The top right corner depicts four of the nine nodes failing. This state is a
+failure state. The group cannot make progress but no data can been
+lost. Progress is blocked because more than one cluster cannot reach
+consensus. Since no cluster was completely destroyed, all data still exists on
+at least one node.
+
+The bottom left corner is impossible because if data can be lost then we
+certainly cannot make progress.
+
+The bottom right corner depicts six of the nine nodes failing. This state is
+also a failure state. The group cannot make progress and will lose
+data. Progress is blocked because more than one cluster cannot reach
+consensus. Additionally, two complete clusters have been lost so half of the
+data cannot be recovered.
+
+In general, progress ceases if more than one cluster cannot reach consensus and
+data loss occurs if more than one cluster completely fails. The lower bound of
+failed nodes for progress cessation in \phatraidcf{$C$}{$f$} is:
+    $$ C\cdot(f+1) $$
+and the lower bound of failed nodes for data loss is:
+    $$ 2\cdot(2f+1) $$
+
+In contrats, if all data has been propagated to all nodes, data is
+only lost when all nodes die. If data has not been propagated to all nodes, then
+loss occurs if all nodes containing the data die.
+
+\subsection{Performance}
 
 \section{Conclusion}
 
