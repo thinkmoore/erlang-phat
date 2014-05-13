@@ -1,6 +1,7 @@
 \documentclass[10pt,letter]{article}
 
 \usepackage{amsmath}
+\usepackage{url}
 \usepackage{amssymb}
 % packages that allow mathematical formatting
 
@@ -122,6 +123,37 @@ storing large files. We present \phatraid{} which mitigates this bottleneck by
 partitioning files across many \paxos{} groups which form a \raid{1} group.
 
 \section{Introduction}
+
+\subsection{Disk Performance}
+
+An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system. {\bf TODO more}
+
+In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) were compared with Solid State Drives (SDD). HDDs use a physical magnetic platter that spins so that a drive head can read or write data by sensing or manipulating the magnetic field in a particular position on to the platter. In contrast, Solid SDD have no moving parts and instead uses integrated circuits as memory to store data persistently. Because the way in which data is accessed is different, the performance characteristics between the two are different.
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{disk-perf}
+\caption{{\bf Left Chart}: Solid State Disk reads across entire drive (Left -- Outermost sector, Right -- Innermost sector), {\bf Right Chart}: Hard Disk reads across the entire drive (Left -- Outer rim, Right -- Inner rim). From \cite{disk-perf}}
+\label{fig:hdd-vs-sdd}
+\end{figure}
+
+Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SDD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SDDs do not exhibit this problem as there is no spinning platter. The right diagram in \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk.
+
+\urldef\hwbenchmark\url{http://www.tomshardware.com/charts/ssd-charts-2013/benchmarks%2C129.html}
+\begin{figure}
+\centering
+\begin{tabular}{l || c}
+\multicolumn{2}{c}{{\bf Solid State Disk Performance Benchmarks}} \\ \hline
+Sequential Write Speed  \hspace{7em} & 55.03 - 481.85 MB/sec \\ 
+Write Access Time & 0.03 - 0.32 seconds \\ \hline
+Sequential Read Speed &  207.95 - 522.45 MB/sec \\
+Read Access Time & 0.03 - 0.22 seconds
+\end{tabular}
+\caption[Solid State Performance]{Solid State Disk performance for middle 95\% of sold state drives tested in a benchmark. Benchmark available at Benchmark available at \hwbenchmark.}
+\label{fig:sdd-perf}
+\end{figure}
+
+Figure \ref{fig:sdd-perf} shows the performance for SSDs from a 2013 survey of commercially available SDDs.
 
 \section{Implementation}
 
