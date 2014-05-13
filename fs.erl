@@ -7,7 +7,7 @@
 -export([code_change/3,handle_call/3,handle_cast/2,stop/0,handle_info/2]).
 -export([getroot/0,mkfile/3,open/2,getcontents/1,putcontents/2,readdir/1]).
 -export([mkdir/2,stat/1,flock/3,refreshlock/2,funlock/1,remove/1,checktimeout/2,forcelock/3,dontlock/1]).
--export([dump/0,clear/0]).
+-export([dump/0,clear/0, fswritedelay/1]).
 
 %% Disk latency simulation constants
 -define(MB_PER_CHAR, 500).
@@ -143,6 +143,8 @@ handle_call(OpName,_,State) ->
 
 fswritedelay(Data) ->
     WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_WRITE_THRUPUT_MB_S) + ?DISK_WRITE_ACCESS_TIME_S,
+    io:fwrite("writing a file of size ~p MB, will take ~p seconds ~n", [byte_size(Data) * ?MB_PER_CHAR, WaitTime]),
+    
     receive
     after
         trunc(WaitTime * 1000) -> ok
@@ -150,6 +152,7 @@ fswritedelay(Data) ->
 
 fsreaddelay(Data) ->
     WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
+    io:fwrite("reading a file of size ~p MB, will take ~p seconds ~n", [byte_size(Data) * ?MB_PER_CHAR, WaitTime]),
     receive
     after
         trunc(WaitTime * 1000) -> ok
