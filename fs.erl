@@ -10,7 +10,7 @@
 -export([dump/0,clear/0]).
 
 %% Disk latency simulation constants
--define(MB_PER_CHAR, 10).
+-define(MB_PER_CHAR, 500).
 -define(DISK_WRITE_THRUPUT_MB_S, 200.0).
 -define(DISK_WRITE_ACCESS_TIME_S, 0.03).
 -define(DISK_READ_THRUPUT_MB_S, 200.0).
