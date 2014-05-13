@@ -76,7 +76,26 @@
 \lstset{language=erlang}
 
 \usepackage{tikz}
-\usetikzlibrary{graphdrawing}
+\usetikzlibrary{backgrounds}
+\usetikzlibrary{fit}
+\usetikzlibrary{positioning}
+
+\pgfdeclarelayer{b}
+\pgfdeclarelayer{f}
+\pgfsetlayers{b,main,f}
+
+\newcommand{\plate}[4]{
+\begin{pgfonlayer}{b}
+\node (invis#1) [draw, color=white, inner sep=1pt,rectangle,fit=#2] {};
+\end{pgfonlayer}
+\begin{pgfonlayer}{f}
+\node (capt#1) [ below left=0 pt of invis#1.south east, xshift=2pt,yshift=1pt, fill=black!15]
+{\footnotesize{#3}};
+\end{pgfonlayer}
+\begin{pgfonlayer}{b}
+\node (#1) [fill=black!15, rounded corners, inner sep=5pt, rectangle,fit=(invis#1) (capt#1),#4] {};
+\end{pgfonlayer}
+}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Macros
@@ -86,7 +105,6 @@
 \newcommand{\phatraid}[0]{\textsc{PhatRaid}}
 \newcommand{\raid}[1]{\textsc{RAID #1}}
 \newcommand{\paxos}[0]{\textsc{Paxos}}
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
@@ -109,6 +127,43 @@ partitioning files across many \paxos{} groups which form a \raid{1} group.
 
 \subsection{System Organization}
 
+\begin{figure}
+  \begin{tikzpicture}
+    [->,scale=.8,]
+    \node [rectangle, draw, thick] (raidclient) at (0,2) {Raid Client};
+    \node [rectangle, draw, thick] (client1) at (-4,1) {Client 1};
+    \node [rectangle, draw, thick] (client2) at (0,0) {Client 2};
+    \node [rectangle, draw, thick] (client3) at (4,1) {Client 3};
+    \node [rectangle, draw, thick] (vr11) at (-7, -2) {Master};
+    \node [rectangle, draw, thick] (vr12) at (-5, -2) {Replica};
+    \node [rectangle, draw, thick] (vr13) at (-3, -2) {Replica};
+    \node [rectangle, draw, thick] (vr21) at (-2, -4) {Master};
+    \node [rectangle, draw, thick] (vr22) at (0, -4) {Replica};
+    \node [rectangle, draw, thick] (vr23) at (2, -4) {Replica};
+    \node [rectangle, draw, thick] (vr31) at (3, -2) {Master};
+    \node [rectangle, draw, thick] (vr32) at (5, -2) {Replica};
+    \node [rectangle, draw, thick] (vr33) at (7, -2) {Replica};
+
+
+    \foreach \to in {client1, client2, client3}
+    \draw [thick] (raidclient) -- (\to);
+    \foreach \to in {vr11, vr12, vr13}
+    \draw [thick] (client1) -- (\to);
+    \foreach \to in {vr21, vr22, vr23}
+    \draw [thick] (client2) -- (\to);
+    \foreach \to in {vr31, vr32, vr33}
+    \draw [thick] (client3) -- (\to);
+
+    \plate{clientnode}{(raidclient)(client1)(client2)(client3)}{Client Node}{}
+    \plate{pc1}{(vr11)(vr12)(vr13)}{Phat Cluster \#1}{}
+    \plate{pc2}{(vr21)(vr22)(vr23)}{Phat Cluster \#2}{}
+    \plate{pc3}{(vr31)(vr32)(vr33)}{Phat Cluster \#3}{}
+
+  \end{tikzpicture}
+  \caption{Organizational Diagram}
+  \label{fig:organization}
+\end{figure}
+
 \phatraid{} is implemented in Erlang, reusing our previous implementation of
 \phat{}. The implementation is divided into three domains: the server cluster,
 the client, and the raid-client. The server code implements a VR-like consensus
@@ -117,7 +172,15 @@ API which hides the communication bookkeeping. The raid-client provides a file
 system API which transparently partitions files and reassembles them as they are
 sent and received from the server cluster.
 
+Figure \ref{fig:organization} depicts the organization of our system. The
+raid-client delegates communication to each client. Each client is connected to
+one \phat{} cluster, which has a master and a number of replicas.
 
+Each \phat{} cluster maintains a file system which is separate and distinct from
+the file systems of other \phat{} clusters. Generally, two phat clusters do not
+communicate.
+
+\subsection{Implenting RAID on \phat{}}
 
 \subsection{Erlang and Behaviors}
 
@@ -292,8 +355,8 @@ We implemented Viewstamped Replication\cite{liskov2012viewstamped} to achieve
 consensus in the file system. Listing \ref{lst:genfsm} defines how to handle
 prepare messages sent to a node in the replica state. It is piecewise defined by
 pattern matching on the arguments. The first two definition clauses use the
-\lstinline!when! keyword to specify arbitrary, required relationships between
-the matched variables.
+\lstinline!when! keyword to specify arbitrary required relationships between the
+matched variables.
 
 The final definition clause triggers when the replica receives a message in the
 current view. The replica adds the message to a sorted queue and calls a

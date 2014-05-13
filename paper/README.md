@@ -1,8 +1,8 @@
 # Note on Compilation
 
-You should compile the pdf with `lualatex`, a la:
+You should compile the pdf with `pdflatex`, a la:
 
-    lualatex paper
+    pdflatex paper
     bibtex   paper
-    lualatex paper
-    lualatex paper
+    pdflatex paper
+    pdflatex paper
