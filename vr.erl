@@ -8,6 +8,9 @@
 -define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
+-define(MASTER_TIMEOUT, 20000).
+-define(REPLICA_TIMEOUT, 100000).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% INTERFACE CODE -- use startNode and startPrepare
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -17,7 +20,7 @@ startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
     MasterNode = chooseMaster(#{ allNodes => Nodes}, 0),
     S = #{ commitFn => CommitFn, masterNode => MasterNode, allNodes => Nodes, 
         clientsTable => dict:new(), viewNumber => 0, log => [], opNumber => 0, 
-        uncommittedLog => [], timeout => 4100, commitNumber => 0, 
+        uncommittedLog => [], timeout => ?REPLICA_TIMEOUT, commitNumber => 0, 
 
         % (complicated data structure invariant so it gets a comment:)
         % Dictionary of view number to list of startViewChanges (unique to sending node)
@@ -27,7 +30,7 @@ startNode(NodeName = {Name,_Node}, AllNodes, CommitFn) ->
         doViewChanges => dict:new(), nonce => 0 },
     if 
         NodeName == MasterNode ->
-            gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := 1100 }}, []);
+            gen_fsm:start_link({local, Name}, vr, {master, S#{ timeout := ?MASTER_TIMEOUT }}, []);
         true ->
             gen_fsm:start_link({local, Name}, vr, {replica, S}, [])
     end.
@@ -241,9 +244,9 @@ viewChange({doViewChange, NViewNumber, NLog, NOpNumber, NCommitNumber, Node},
                     sendToReplicas(MasterNode, AllNodes, {startView, MaxView, MaxLog, MaxOp, MaxCommit, MasterNode}),
                     processUncommittedLogs(lists:sort(MaxLog), CommitNumber, MaxCommit, ClientsTable, master, CommitFn),
                     {next_state, master, State#{ doViewChanges := dict:new(),
-                        timeout := 1000,
+                        timeout := ?MASTER_TIMEOUT,
                         log := MaxLog, opNumber := MaxOp, commitNumber := MaxCommit, viewNumber := MaxView
-                     }, 1000};
+                     }, ?MASTER_TIMEOUT};
                 true ->
                     NewDoViewChanges = dict:store(Node, {NLog, NOpNumber, NCommitNumber, NViewNumber}, DoViewChanges),
                     {next_state, viewChange, State#{ doViewChanges := NewDoViewChanges }, Timeout}
@@ -261,7 +264,7 @@ viewChange({startView, MaxView, MaxLog, MaxOp, MaxCommit, From},
     io:fwrite("Node ~p to replica for master ~p and view ~p~n", [MyNode, MasterNode, MaxView]),
     {next_state, replica, State#{ viewNumber := MaxView, opNumber := MaxOp, 
         commitNumber := CommitNumber, log := MaxLog, doViewChanges := dict:new(), 
-        timeout := 4100 }, 4100};
+        timeout := ?REPLICA_TIMEOUT }, ?REPLICA_TIMEOUT};
 
 viewChange(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Nodes, 
     timeout := Timeout, masterNode := MasterNode } = State) ->

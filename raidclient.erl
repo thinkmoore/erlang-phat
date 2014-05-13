@@ -6,6 +6,8 @@
 -export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2,store_chunk/5,get_chunk/4]).
 -export([dotestloop/1,testloop/1]).
 
+-define(TIMEOUT, 100000).
+
 % want Nodes to a list where each element is all the nodes for a single VR cluster
 start_link(Clusters) ->
     NumChunks = length(Clusters),
@@ -17,7 +19,7 @@ init([Clients,NumChunks]) ->
     {ok, #{ clients => Clients, numchunks => NumChunks} }.
 
 call(Operation) ->
-    gen_server:call(raid,Operation).
+    gen_server:call(raid,Operation,?TIMEOUT).
 
 %% Server teardown
 terminate(Reason,_) ->
@@ -83,9 +85,10 @@ wait_for_store(TotalNum, Received) when Received < TotalNum ->
 	ok ->
 	    wait_for_store(TotalNum, Received + 1);
 	Resp ->
-     	    terminate("Didn't receive ok from a store",{Resp})
+            io:fwrite("Response was ~p~n", [Resp]),
+     	    terminate("Didn't receive ok from a store",{})
     after
-     	10000 ->
+     	?TIMEOUT ->
      	    terminate("timeout waiting for store chunks",{})
     end.
 
@@ -105,7 +108,7 @@ wait_for_chunks(TotalNum, Received, Acc) when Received < TotalNum ->
 	{Block, N} ->
 	    wait_for_chunks(TotalNum, Received + 1, [{Block,N}|Acc])
     after
-     	10000 ->
+     	?TIMEOUT ->
      	    terminate("timeout waiting for get chunks", {})
     end.
 

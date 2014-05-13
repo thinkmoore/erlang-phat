@@ -7,12 +7,14 @@
 -export([handle_call/3,handle_info/2,code_change/3]).
 -export([start_link/0,clientRequest/2,stop/0,commit/3]).
 
+-define(TIMEOUT, 100000).
+
 init(_) ->
     io:fwrite("Starting server on ~p~n", [node()]),
     {ok, []}.
 
 commit(_, Op, NodeType) ->
-    Ret = gen_server:call(fs,Op),
+    Ret = gen_server:call(fs,Op,?TIMEOUT),
     io:fwrite("Commited ~p as ~p on ~p~n", [Op,NodeType,node()]),
     {reply, Ret}.
 
@@ -61,5 +63,5 @@ clientRequest(Seq,Operation) ->
     receive
         Message -> ?debugFmt("server.erl got: ~p~n",[Message]), Message
     after
-        1000 -> timeout
+        ?TIMEOUT -> timeout
     end.

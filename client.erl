@@ -4,6 +4,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,handle_cast/2,handle_info/2,code_change/3]).
 
+-define(TIMEOUT, 100000).
+
 %% State is {master => MasterNode, alternates => Nodes, seq => SequenceNumber}
 
 start() ->
@@ -36,10 +38,10 @@ init([Master|Rest]) ->
     {ok, #{master => Master, alternates => [Master|Rest], seq => 0}}.
 
 call(Operation) ->
-    gen_server:call(client,Operation).
+    gen_server:call(client,Operation,?TIMEOUT).
 
 call(Name, Operation) ->
-    gen_server:call(Name,Operation).
+    gen_server:call(Name,Operation,?TIMEOUT).
 
 nextMaster(Master,[Master,Next|_],_) ->
     Next;
@@ -52,7 +54,7 @@ handle_call(Operation,Caller,State) ->
     #{seq := SeqNum, master := Master, alternates := Alternates} = State,
     %% Client = self(),
     ?debugFmt("calling: ~p with ~p ~p ~n",[Master,SeqNum,Operation]),
-    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation], 4000),
+    Response = rpc:call(Master, server, clientRequest, [SeqNum,Operation], ?TIMEOUT),
     case Response of
         timeout ->
 	    NewMaster = nextMaster(Master,Alternates,Alternates),
