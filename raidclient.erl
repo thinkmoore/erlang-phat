@@ -5,9 +5,10 @@
 -export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
 -export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2,store_chunk/5,get_chunk/4]).
 -export([dotestloop/1,testloop/1]).
+-export([profile/2]).
 
 -define(TIMEOUT, 100000).
--define(MB_PER_BYTE, 1).
+-define(MB_PER_BYTE, 1). 
 -define(XOR_TIME_MB_PER_SEC, 20000).
 
 % want Nodes to a list where each element is all the nodes for a single VR cluster
@@ -142,9 +143,32 @@ handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) 
 	    io:fwrite("~p~n", ["Parity check failed!"])
     end,
     {reply, Data, State};
+
+handle_call({clear},_, State = #{ clients := Clients}) ->
+    lists:map(fun (Client) -> gen_server:call(Client,{clear}) end, Clients),
+    {reply, ok, State};
+
 handle_call({stop},_,State = #{ clients := Clients}) ->
     lists:map(fun (Client) -> gen_server:cast(Client,stop) end, Clients),
     {reply, stopped, State}.   
+
+
+
+profile(Filesize, Trials) ->
+    File = [48 || Num <- lists:seq(0, Filesize-1)],
+    lists:map(fun(I) ->
+        {TimeStore, ValueStore} = timer:tc(fun call/1, [{store, "file" ++ I + 48, File}]),
+        {TimeFetch, ValueFetch} = timer:tc(fun call/1, [{get, "file" ++ I + 48}]),
+
+        ValueFetch2 = binary_to_list(ValueFetch),
+        if
+            ValueFetch2 =/= File ->
+                io:fwrite("didn't get back same file ~p ~n", [ValueFetch]);
+            true -> ok
+        end,
+        io:fwrite("Store Time: ~p ms -- Fetch Time: ~p ms ~n", [TimeStore / 1000, TimeFetch / 1000])
+    end, lists:seq(1, Trials)),
+    call({clear}).
 
 test() ->
     Store = raidclient:call({store,"name1","abcdefghijklmnopqrstuvwxyz"}),

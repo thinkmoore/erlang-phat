@@ -12,7 +12,7 @@
 %% Disk latency simulation constants
 -define(MB_PER_CHAR, 1).
 %slow
--define(DISK_WRITE_THRUPUT_MB_S, 55.0).
+-define(DISK_WRITE_THRUPUT_MB_S, 5.0).
 -define(DISK_WRITE_ACCESS_TIME_S, 0.00032).
 -define(DISK_READ_THRUPUT_MB_S, 208.0).
 -define(DISK_READ_ACCESS_TIME_S, 0.00022).
@@ -158,12 +158,13 @@ fswritedelay(Data) ->
     end.
 
 fsreaddelay(Data) ->
-    WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
-    io:fwrite("reading a file of size ~p MB, will take ~p seconds ~n", [byte_size(Data) * ?MB_PER_CHAR, WaitTime]),
-    receive
-    after
-        trunc(WaitTime * 1000) -> ok
-    end.
+    ok.
+    % WaitTime = byte_size(Data) * (?MB_PER_CHAR / ?DISK_READ_THRUPUT_MB_S) + ?DISK_READ_ACCESS_TIME_S,
+    % io:fwrite("reading a file of size ~p MB, will take ~p seconds ~n", [byte_size(Data) * ?MB_PER_CHAR, WaitTime]),
+    % receive
+    % after
+    %     trunc(WaitTime * 1000) -> ok
+    % end.
 
 
 %% Functions that actually do stuff

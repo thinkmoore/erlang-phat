@@ -2,7 +2,7 @@
 -behavior(gen_server).
 -define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,handle_cast/2,handle_info/2,code_change/3]).
+-export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,profile/2,handle_cast/2,handle_info/2,code_change/3]).
 
 -define(TIMEOUT, 100000).
 
@@ -86,3 +86,29 @@ handle_call(Operation,Caller,State) ->
 	    ?debugFmt("bad response: ~p state: ~p~n",[Other,State]),
 	    {reply, {unexpected_client,Other}, State}
     end.
+
+
+
+profile(Filesize, Trials) ->
+    File = list_to_binary([48 || Num <- lists:seq(0, Filesize-1)]),
+    lists:map(fun(I) ->
+        Filename = ["file" ++ [(I + 48)]],
+        _Val = call({mkfile, {handle,[]}, Filename, ""}),
+        {TimeStore, ValueStore} = timer:tc(fun call/1, [{putcontents, {handle, Filename}, File}]),
+        receive
+        after
+            5000 -> ok
+        end,
+        {TimeFetch, ValueFetch} = timer:tc(fun call/1, [{getcontents, {handle, Filename}}]),
+
+        ValueFetch2 = (ValueFetch),
+        if
+            ValueFetch2 =/= File ->
+                io:fwrite("didn't get back same file ~p ~n", [ValueFetch]);
+            true -> ok
+        end,
+        io:fwrite("Store Time: ~p ms -- Fetch Time: ~p ms ~n", [TimeStore / 1000, TimeFetch / 1000])
+    end, lists:seq(1, Trials)),
+    call({clear}).
+
+
