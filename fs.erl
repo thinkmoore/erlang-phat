@@ -10,11 +10,11 @@
 -export([dump/0,clear/0, fswritedelay/1]).
 
 %% Disk latency simulation constants
--define(MB_PER_CHAR, 500).
--define(DISK_WRITE_THRUPUT_MB_S, 200.0).
--define(DISK_WRITE_ACCESS_TIME_S, 0.03).
--define(DISK_READ_THRUPUT_MB_S, 200.0).
--define(DISK_READ_ACCESS_TIME_S, 0.03).
+-define(MB_PER_CHAR, 1).
+-define(DISK_WRITE_THRUPUT_MB_S, 55.0).
+-define(DISK_WRITE_ACCESS_TIME_S, 0.00032).
+-define(DISK_READ_THRUPUT_MB_S, 208.0).
+-define(DISK_READ_ACCESS_TIME_S, 0.00022).
 
 %% Calls into the server
 getroot() ->

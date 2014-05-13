@@ -7,7 +7,7 @@
 -export([dotestloop/1,testloop/1]).
 
 -define(TIMEOUT, 100000).
--define(MB_PER_BYTE, 500).
+-define(MB_PER_BYTE, 1).
 -define(XOR_TIME_MB_PER_SEC, 20000).
 
 % want Nodes to a list where each element is all the nodes for a single VR cluster
