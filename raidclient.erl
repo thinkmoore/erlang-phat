@@ -7,6 +7,8 @@
 -export([dotestloop/1,testloop/1]).
 
 -define(TIMEOUT, 100000).
+-define(MB_PER_BYTE, 500).
+-define(XOR_TIME_MB_PER_SEC, 20000).
 
 % want Nodes to a list where each element is all the nodes for a single VR cluster
 start_link(Clusters) ->
@@ -57,6 +59,12 @@ binary_bxor(B1, B2) ->
     S2 = size(B2)*8,
     <<I1:S1>> = B1,
     <<I2:S2>> = B2,
+    WaitTime = max(S1,S2) / 8 * ?MB_PER_BYTE / ?XOR_TIME_MB_PER_SEC,
+    io:fwrite("XOR wait time ~p seconds for ~p MB ~n", [WaitTime, max(S1, S2) / 8 * ?MB_PER_BYTE]),
+    receive
+    after
+        trunc(WaitTime * 1000) -> ok
+    end,
     I3 = I1 bxor I2,
     S3 = max(S1, S2),
     <<I3:S3>>.	       
