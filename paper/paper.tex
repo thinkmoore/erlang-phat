@@ -663,7 +663,21 @@ For \phatraidcf{6}{1} we calculate:
 
 \subsection{Performance}
 
+\begin{figure}
+  \includegraphics[scale=0.45]{Store.pdf}
+  \caption{Scatter Plot of Various \phatraidcf{$C$,$f$} Configurations}
+  \label{fig:plot}
+\end{figure}
 
+We evaluated a prototype \phatraidcf{C}{f} implementation. We simulated disk
+latency with sleeps. All experiments are run on a 2013-model MacBook Pro with
+8GB of RAM, and a 3GHz Intel Core i7. We found that latency scales as
+$\frac{1}{C-1}$. This is the expected behavior for breaking a file into $C-1$
+chunks. We always use one bit of parity.
+
+As expected \phatraidcf{2}{$f$} does not perform better than non-RAID \phat{}
+(i.e. \phatraidcf{1}{$f$}) because the data is not sharded into pieces, and the
+parity bit acts as a complete duplicate of the file.
 
 \section{Future Work}
 
