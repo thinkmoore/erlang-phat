@@ -8,7 +8,7 @@
 -define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
 
--define(MASTER_TIMEOUT, 20000).
+-define(MASTER_TIMEOUT, 500).
 -define(REPLICA_TIMEOUT, 100000).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

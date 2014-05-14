@@ -61,7 +61,7 @@ binary_bxor(B1, B2) ->
     <<I1:S1>> = B1,
     <<I2:S2>> = B2,
     WaitTime = max(S1,S2) / 8 * ?MB_PER_BYTE / ?XOR_TIME_MB_PER_SEC,
-    io:fwrite("XOR wait time ~p seconds for ~p MB ~n", [WaitTime, max(S1, S2) / 8 * ?MB_PER_BYTE]),
+    %io:fwrite("XOR wait time ~p seconds for ~p MB ~n", [WaitTime, max(S1, S2) / 8 * ?MB_PER_BYTE]),
     receive
     after
         trunc(WaitTime * 1000) -> ok
@@ -77,21 +77,28 @@ binary_to_chunks(B,G) ->
     [Xor|Splits].
 
 store_chunk(Client,Chunk,Name,Num,Pid) ->
+    %io:fwrite("starting ~p ~n", [Num]), 
     client:call(Client,{mkfile,{handle,[]},[Name, Num],""}),
     Resp = client:call(Client,{putcontents,{handle,[Name, Num]},Chunk}),
+    %io:fwrite("all done ~p ~n", [Num]),
     Pid ! Resp.
 
 store_chunks(Clients,Chunks,TotalNum,Name) ->
+    %io:fwrite("starting to send ~n"),
     lists:zipwith3(fun (Client, Chunk, Num) ->
 			  spawn(raidclient, store_chunk, [Client,Chunk,Name,Num,self()]) end, 
 		          Clients, Chunks, lists:seq(0, TotalNum - 1)),
+    %io:fwrite("starting to wait ~n"),
     wait_for_store(TotalNum, 0).
 
 wait_for_store(TotalNum, TotalNum) ->
+    %io:fwrite("totally done with store~n"),
     {ok};
+
 wait_for_store(TotalNum, Received) when Received < TotalNum ->
     receive
 	ok ->
+        %io:fwrite("got an ok ~n"),
 	    wait_for_store(TotalNum, Received + 1);
 	Resp ->
             io:fwrite("Response was ~p~n", [Resp]),
@@ -144,22 +151,23 @@ handle_call({get,Name},_,State = #{ clients := Clients, numchunks := TotalNum}) 
     end,
     {reply, Data, State};
 
-handle_call({clear},_, State = #{ clients := Clients}) ->
-    lists:map(fun (Client) -> gen_server:call(Client,{clear}) end, Clients),
-    {reply, ok, State};
-
 handle_call({stop},_,State = #{ clients := Clients}) ->
     lists:map(fun (Client) -> gen_server:cast(Client,stop) end, Clients),
-    {reply, stopped, State}.   
+    {reply, stopped, State};
 
+handle_call(PassThru,_, State = #{ clients := Clients}) ->
+    lists:map(fun (Client) -> gen_server:call(Client,PassThru, ?TIMEOUT) end, Clients),
+    {reply, ok, State}.
 
 
 profile(Filesize, Trials) ->
     File = [48 || Num <- lists:seq(0, Filesize-1)],
     lists:map(fun(I) ->
         {TimeStore, ValueStore} = timer:tc(fun call/1, [{store, "file" ++ I + 48, File}]),
+        call({getroot}), % flush the commit pipelineeee ( ask lucas )
         {TimeFetch, ValueFetch} = timer:tc(fun call/1, [{get, "file" ++ I + 48}]),
-
+        call({getroot}), % flush the commit pipelineeee ( ask lucas )
+        
         ValueFetch2 = binary_to_list(ValueFetch),
         if
             ValueFetch2 =/= File ->

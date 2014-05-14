@@ -51,6 +51,7 @@ nextMaster(Master,[],Alternates) ->
     nextMaster(Master,Alternates,Alternates).
 
 handle_call(Operation,Caller,State) ->
+    %io:fwrite("starting work...~p~p~n", [Operation,self()]),
     #{seq := SeqNum, master := Master, alternates := Alternates} = State,
     %% Client = self(),
     ?debugFmt("calling: ~p with ~p ~p ~n",[Master,SeqNum,Operation]),
@@ -95,10 +96,7 @@ profile(Filesize, Trials) ->
         Filename = ["file" ++ [(I + 48)]],
         _Val = call({mkfile, {handle,[]}, Filename, ""}),
         {TimeStore, ValueStore} = timer:tc(fun call/1, [{putcontents, {handle, Filename}, File}]),
-        receive
-        after
-            5000 -> ok
-        end,
+        client:call({getroot}), % flush the commit pipelineeee ( ask lucas )
         {TimeFetch, ValueFetch} = timer:tc(fun call/1, [{getcontents, {handle, Filename}}]),
 
         ValueFetch2 = (ValueFetch),
