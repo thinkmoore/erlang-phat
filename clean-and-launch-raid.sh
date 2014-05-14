@@ -14,18 +14,19 @@ mkdir tests
 killall beam.smp
 erlc *.erl
 bash start-raid.sh $N $C tests
+NODE_PER_CLUSTER=$(expr $N / $C)
 NODE_LIST="["
-for i in $(seq 1 $C $(expr $N - $C))
+for i in $(seq 1 $NODE_PER_CLUSTER $(expr $N - $NODE_PER_CLUSTER))
 do
     NODE_LIST+="["
-    for j in $(seq $i $(expr $i + $C - 2))
+    for j in $(seq $i $(expr $i + $NODE_PER_CLUSTER - 2))
     do
         NODE_LIST+="n$j@localhost, "
     done
     NODE_LIST+="n$(expr $j + 1)@localhost],"
 done
 NODE_LIST+="["
-for j in $(seq $(expr $N - $C + 1) $(expr $N - 1))
+for j in $(seq $(expr $N - $NODE_PER_CLUSTER + 1) $(expr $N - 1))
 do
     NODE_LIST+="n$j@localhost, "
 done
