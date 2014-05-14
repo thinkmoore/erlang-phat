@@ -129,6 +129,14 @@ partitioning files across many \paxos{} groups which form a \raid{1} group.
 
 \section{Introduction}
 
+Google's \chubby{}\cite{burrows-chubby} is a distributed file system which
+achieves consensus in the face of limited failures. Unfortunately, for storing
+large files disk latency on the cluster nodes is a bottleneck. We propose
+building a RAID group out of distributed file system clusters. Large files are
+sharded and disk latency is reduced proportional to number of clusters. Failure
+resiliency is not completely sacrificed and we provide an analysis of the
+new failure modes.
+
 \subsection{Disk Performance}
 
 An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system. {\bf TODO more}
@@ -168,12 +176,15 @@ Figure \ref{fig:sdd-perf} shows the performance for SSDs from a 2013 survey of c
 
 \phatraid{} is implemented in Erlang. Erlang is a pure, functional language with
 extensive library support for distributed applications. Erlang has one unit of
-concurrency, the process, and one unit of distribution, the node. Each Erlang
-node consists of an arbitrary number of processes. Erlang nodes may live on the
-same machine or on different machines connected by a network. Every Erlang node
-is given a name by an Erlang name server. Erlang processes may communicate with
-any Erlang node which they can name. Erlang processes interact with one another
-by making RPC calls.
+concurrency, the \emph{process}, and one unit of distribution, the
+\emph{node}. Each Erlang node consists of an arbitrary number of
+processes. Erlang nodes may live on the same machine or on different machines
+connected by a network. Every Erlang node is given a name by an Erlang name
+server. Erlang processes may communicate with any Erlang node or process it can
+name. Erlang processes interact with one another by making RPC calls or sending
+messages. Identifiers beginning with a lowercase letter are actually atoms, like
+Scheme's symbols. Identifiers beginning with an uppercase letter are normal
+identifiers.
 
 \subsection{System Organization}
 
@@ -233,7 +244,8 @@ one \phat{} cluster, which has a master and a number of replicas.
 
 Each \phat{} cluster maintains a file system which is separate and distinct from
 the file systems of other \phat{} clusters. Generally, two phat clusters do not
-communicate.
+communicate. The raid-client and client processes all live on one node. Each
+\phat{} master and \phat{} replica lives on its own node.
 
 \subsection{Disk Emulation and Abstraction Layer}
 
@@ -243,37 +255,38 @@ to simulate SSD performance so they .
 \subsection{RAIDing \phat{}}
 
 A \phatraidcf{$C$}{$f$} implementation is parameterized by two numbers: $C$, the
-number of \phat{} clusters, and $f$, the \phat{} cluster failure threshold. A
+number of \phat{} clusters, and $f$, the \phat{} cluster failure tolerance. A
 single \phat{} cluster contains $2f + 1$ nodes. A \phatraid{} group contains $C$
 clusters for a total of $C(2f+1)$ \phat{} nodes. A \phatraid{} group can be
 concurrently accessed by an arbitrary number of raid-clients.
 
-On a client node, the raid-client spawns $C$ client processes which each maintain
-a connection to one of the $C$ \phat{} clusters. All communications between the
-raid-client and a phat cluster go through the assigned client process.
+On a client node, the raid-client spawns $C$ client processes which each
+maintain a connection to one of the $C$ \phat{} clusters. Each client process
+mediates all communication between its assigned \phat{} cluster and the
+raid-client.
+
+A store operation on the raid-client breaks the file into $C-1$ chunks, stores
+each chunk on a cluster, and stores a parity bit on the remaining cluster. A
+raid-client fetch operation reconstructs the file from the $C-1$ chunks, using
+the parity bit if necessary.
 
 \subsection{Erlang Behaviors}
 
-In Erlang, the basic unit of concurrency is a \emph{process} and an Erlang VM is
-known as a \emph{node}. A process may communicate with other processes on its
-node as well as processes on other nodes. Multiple nodes may be on the same
-machine or distributed across many machines.
-
-The server cluster is implemented as a collection of nodes running the same
-server code. One of these nodes is designated the master node. The other nodes
-are known as replicas.
+The server cluster is a collection of nodes running the same server code. One of
+these nodes is designated the master node (aka \phat{} Master). The other nodes are
+known as \phat{} replicas or just replicas.
 
 The master and each replica has four components: the supervisor, the
-(unfortunately named) server, VR, and the file system.
+(unfortunately named) server, VR, and the file system:
 
 \begin{itemize}
-\item the supervisor -- if any of the other three processes dies, it shuts all
-  of them down and restarts all of them
-\item the server -- if the node is the master, it passes messages on to VR; if
-  the node is a replica, it redirects clients to the master
+\item the supervisor -- restarts the other three processes if any single node dies
+\item the server -- passes messages to the VR process if this node is the
+  \phat{} master; otherwise, it drops the message and informs the client of the
+  current master node
 \item VR -- maintains a log of opaque messages, achieving consensus with other
   nodes in the cluster via the Viewstamped Replication protocol
-\item the file system -- a simple hierarchical file system with locks
+\item the file system -- maintains a simple hierarchical file system with locks
 \end{itemize}
 
 The four components are implemented using Erlang behaviors. An Erlang behavior
@@ -288,7 +301,7 @@ uses the \texttt{gen\_fsm} behavior.
 \item The \texttt{gen\_server} behavior provides a framework for many-client
   single-server interactions. We implemented functions to process messages
   formatted as Erlang tuples. The \texttt{gen\_server} behavior handles
-  low-level socket interaction.
+  low-level socket interaction, messaging queueing, etc.
 \item The \texttt{gen\_fsm} behavior generalizes the \texttt{gen\_server}
   behavior by permitting the server to have a finite number of states. Each
   state has a set of functions with which to process messages. This behavior can
@@ -318,21 +331,22 @@ seconds. If more than one failure occurs in five seconds, the supervisor kills
 all the children and shuts itself down as well.
 
 Each child in the list of children is a 6-tuple consisting of: child name,
-initial procedure call, child transience, shutdown style, child type, necessary
-modules.
+initial procedure call, child transience, shutdown style, child type, and
+necessary modules.
 
 \begin{itemize}
 \item The initial procedure call is a 3-tuple of module, procedure name and
   argument list.
 \item Every child's transience is specified as \lstinline!permanent!, meaning
-  they should be restarted.
+  they \emph{should} be restarted.
 \item Every child has shutdown style \lstinline!1! meaning they will first be
-  asked to terminate and one second later they will be forcibly terminated.
+  asked to terminate and one second later they will be forcibly
+  terminated\footnote{We could also have specified the hastier shutdown style:
+    \lstinline!brutal_kill!}.
 \item All of our children are workers, which are distinguished from
   sub-supervisors.
 \item The necessary modules are dynamically loaded when the child processes is
-  initialized, there is a one-to-one mapping between our children and code
-  modules.
+  initialized. In \phatraid{}, each child only depends on one module.
 \end{itemize}
 
 \subsubsection{The \texttt{gen\_fsm} Behavior}
@@ -421,21 +435,21 @@ behavior will transition to \lstinline!NextState! and set the store to
 behavior will invoke the \lstinline!NextState! procedure with the new message
 and the \lstinline!NewStore!.
 
-We implemented Viewstamped Replication\cite{liskov2012viewstamped} to achieve
-consensus in the file system. Listing \ref{lst:genfsm} defines how to handle
-prepare messages sent to a node in the replica state. It is piecewise defined by
-pattern matching on the arguments. The first two definition clauses use the
-\lstinline!when! keyword to specify arbitrary required relationships between the
-matched variables.
+The \phat{} file system achieves consensus via the Viewstamped Replication
+protocol \cite{liskov2012viewstamped}. Listing \ref{lst:genfsm} defines how to
+handle prepare messages sent to a node in the replica state. It is piecewise
+defined by pattern matching on the arguments. The first two definition clauses
+use the \lstinline!when! keyword to specify arbitrary required relationships
+between the matched variables.
 
 The final definition clause triggers when the replica receives a message in the
 current view. The replica adds the message to a sorted queue and calls a
-processing procedure. The processing procedure is defined separately in Listing
-\ref{lst:processing1} and Listing \ref{lst:processing2}.
+processing procedure. The processing procedure is defined separately in Listings
+\ref{lst:processing1} and \ref{lst:processing2}.
 
 Listing \ref{lst:processing1} handles a message from an out-of-date master,
-i.e., his commit number is older than the replica's commit number. The replica
-first proposes a view change to the cluster. Afterwards, it changes its
+i.e., the master's commit number is older than the replica's commit number. The
+replica first proposes a view change to the cluster. Afterwards, it changes its
 \texttt{gen\_fsm} state to \lstinline!viewChange! and updates the
 store\footnote{The store is called \lstinline!State! in the code listings} with
 the new view number and the new master.
@@ -446,23 +460,25 @@ particular, if the log ends at operation number $n$ and message $n+1$ is dropped
 by the network, all subsequent messages will be buffered. The buffered messages
 will not be added to the log until message $n+1$ is received. The call to
 \lstinline!processBuffer! moves messages to the log, if all previous messages
-have now been received. The call to \lstinline!processLog! commits new messages
-in the log which have been committed by the master node. Lines 405 to 408
+have now been received. The call to \lstinline!processLog! commits logged
+messages which now have been committed by the master node. Lines 405 to 408
 destructure \lstinline!AfterLog! and bind variables for later use. The final
 \lstinline!if! statement responds to the master unless the master has committed
-messages we haven't received.\footnote{This can happen if the network drops a message whose
-  operation number lies between the replica's last commit number and the
-  master's last commit number.}
+messages we haven't received.\footnote{This can happen if the network drops a
+  message whose operation number lies between the replica's last commit number
+  and the master's last commit number.}
 
 \section{Evaluation}
 
 \subsection{Resilience}
 
 We distinguish between two types of failure: cessation of progress and loss of
-data. In a VR cluster without persistent stores, data loss only occurs when all
-$2f+1$ nodes in the cluster fail. In a VR cluster, progress only ceases if $f+1$
-nodes are lost. In \phatraid{} the conditions for cessation of progress and loss
-of data are complicated by the combination of RAID and VR.
+data. In a VR cluster without persistent stores, data loss of fully propagated,
+commited data only occurs when all $2f+1$ nodes in the cluster fail \footnote{If
+  more than $f+1$ nodes die some ``commited but not fully propogated data'' can
+  be lost}. In a VR cluster, progress only ceases if $f+1$ nodes are lost. In
+\phatraid{} the conditions for cessation of progress and loss of data are
+complicated by the combination of RAID and VR.
 
 \begin{figure}
   \centering
@@ -515,52 +531,70 @@ of data are complicated by the combination of RAID and VR.
   \label{fig:failures}
 \end{figure}
 
-Four distributions of failed nodes in \phatraidcf{3}{1} are depicted in Figure
+Four arrangements of failed nodes in \phatraidcf{3}{1} are depicted in Figure
 \ref{fig:failures}. In this section, if we claim ``data is lost'', we mean that
 if no persistent store is used, data will be lost. Adding a persistent store
-obviously prevents loss of committed data.
+obviously prevents loss of committed data. Additionally, we assume node failures
+are independent and uniformly distributed throughout the \phatraid{} group.
 
-The top left corner depicts five of the nine nodes failing. This state is
-\emph{not} a failure state. The group can still make progress and no data is
-lost. The two surviving clusters can reach consensus on new values and can
-reconstruct the failed cluster's data.
+The top left corner, Figure \ref{fig:failures_allok}, depicts five of the nine
+nodes failing. This state is \emph{not} a failure state. The group can still
+make progress and no data is lost. The two surviving clusters can reach
+consensus on new values and can reconstruct the failed cluster's data.
 
-The top right corner depicts four of the nine nodes failing. This state is a
-failure state. The group cannot make progress but no data can been
-lost. Progress is blocked because more than one cluster cannot reach
-consensus. Since no cluster was completely destroyed, all data still exists on
-at least one node.
+The top right corner, Figure \ref{fig:failures_noprogress}, depicts four of the
+nine nodes failing. This state is a failure state. The group cannot make
+progress; however, no data can been lost. Progress is blocked because more than
+one cluster cannot reach consensus. Since no cluster was completely destroyed,
+all data still exists on at least one node.
 
-The bottom left corner is impossible because if data can be lost then we
-certainly cannot make progress.
+The bottom left corner, Figure \ref{fig:failures_impossible}, is impossible
+because if data can be lost then we certainly cannot make progress.
 
-The bottom right corner depicts six of the nine nodes failing. This state is
-also a failure state. The group cannot make progress and will lose
-data. Progress is blocked because more than one cluster cannot reach
-consensus. Additionally, two complete clusters have been lost so half of the
-data cannot be recovered.
-
-In general, progress ceases if more than one cluster cannot reach consensus and
-data loss occurs if more than one cluster completely fails. The lower bound of
-failed nodes for progress cessation in \phatraidcf{$C$}{$f$} is:
-    $$ 2\cdot(f+1) $$
-and the lower bound of failed nodes for data loss is:
-    $$ 2\cdot(2f+1) $$
-
-In contrast, if all data has been propagated to all nodes, data is only lost
-when all nodes die. If data has not been propagated to all nodes, then loss
-occurs if all nodes containing the data die.
+The bottom right corner, Figure \ref{fig:failures_noprogress_dataloss}, depicts
+six of the nine nodes failing. This state is also a failure state. The group
+cannot make progress and will lose data. Progress is blocked because more than
+one cluster cannot reach consensus. Additionally, two complete clusters have
+been lost so half of the data cannot be recovered.
 
 \subsubsection{Theoretical Analysis}
 
-A single number cannot describe the failure threshold of a \phatraid{} cluster
-because of the interplay between VR and RAID. The failure of the \phatraid{}
-group is dependent on the arrangement of the failed nodes. For example, Figure
-\ref{fig:failures_noprogress} depicts a situation wherein only four failures
-stops progress. In contrast, Figure \ref{fig:failures_allok} depicts a situation
-wherein five failures does \emph{not} stop progress.
+In general, progress ceases if more than one cluster \emph{cannot reach
+  consensus} and data loss occurs if more than one \emph{cluster completely
+  fails}. The lower bound of failed nodes for progress cessation in
+\phatraidcf{$C$}{$f$} is:
 
-In a \phatraidcf{3,1} group, less than one-quarter of four-failure arrangements
+    $$ 2\cdot(f+1) $$
+
+and the lower bound of failed nodes for data loss is:
+
+    $$ 2\cdot(2f+1) $$
+
+By the pidgeon hole principle, the upper bound of failed nodes which still
+permit progress is,
+
+    $$ C\cdot f + 1 $$
+
+because we can place $f$ failures in all but one cluster and place $f+1$
+failures in the final cluster.
+
+The upper bound for no data loss is,
+
+    $$ C\cdot 2f + 1 $$
+
+because we can keep one node of all but one cluster alive. From these $C-1$
+nodes we can reconstruct the entire file system.
+
+The bounds presented above cannot fully describe the failure threshold of a
+\phatraid{} cluster because of the interplay between VR and RAID. Instead, we
+will discuss the probability of group failure given $n$ node failures.
+
+Group failure is dependent on the arrangement of failed nodes. For example,
+Figure \ref{fig:failures_noprogress} depicts a situation wherein only four
+failures stops progress. In contrast, Figure \ref{fig:failures_allok} depicts a
+situation wherein five failures does \emph{not} stop progress.
+
+In a \phatraidcf{3}{1} group, less than one-quarter of four-failure arrangements
 stop progress. The necessary condition for progress cessation is that two or
 more clusters have lost at least $f+1$ nodes. By the pidgeon hole principle,
 only the two-in-two, four-failure arrangement stops progress. We can count the
@@ -581,11 +615,10 @@ nodes causing \phatraid{} group failure is
 
     $$ \frac{27}{126} \approx 0.21 $$
 
-When five nodes fail, they can be distributed into each group in the
-proportions: (3,1,1), (3,2,0) and (2,2,1). The first case does not stop progress
-because only one cluster fails. The later two cases stop progress because two
-clusters fail. We calculate the probability of \phatraid{} group failure when
-five nodes fail:
+When five nodes fail, they can be distributed into each group: (3,1,1), (3,2,0)
+and (2,2,1). The first case does not stop progress because only one cluster
+fails. The later two cases stop progress because two clusters fail. We calculate
+the probability of \phatraid{} group failure when five nodes fail:
 
 \begin{align*}
   \textrm{(3,1,1)}\;\;\;
@@ -597,8 +630,8 @@ five nodes fail:
   \textrm{5-Failure Arrs.}\;\;\;
     &\binom{9}{5} = 126 \\
   \textrm{Failure Prob.}\;\;\;
-    &\Pr\left[\textrm{group failure} \,|\, n_{failed} = 5\right] = \frac{81 + 18}{126} =
-    \frac{99}{126} \approx 0.79 \\
+    &\Pr\left[\textrm{group failure} \,|\, \phatraidcf{3}{1},\, n_{failed} = 5\right] \\
+    &= \frac{81 + 18}{126} = \frac{99}{126} \approx 0.79 \\
 \end{align*}
 
 A VR or PAXOS cluster of size nine is resilient to $f = 4$ failures. In
@@ -609,13 +642,13 @@ resilience to $f=5$ failures.
 The general formula for the failure probability distribution is not clear, but
 it is clear that a \phatraidcf{$C$}{$f$} group is absolutely resilient to $2(f +
 1) - 1$ or fewer failures. A \phatraidcf{$C$}{$f$} group is likely resilient
-to $2(f+1)$ failures and unlikely resistant to $2(f+1)+1$ failures.
+to $2(f+1)$ failures and unlikely resistant to $C\cdot f + 1$ failures.
 
-The general form for the probability of \phatraidcf{$C$}{$f$} group failure
-given $2(f + 1)$ node failures is:
+For exactly $2(f+1)$ node failures, the probability of \phatraidcf{$C$}{$f$}
+group failure is:
 
 \begin{align*}
-  \Pr\left[\textrm{group failure} \,|\, \phatraidcf{C}{f}, n_{failure}=2(f+1)\right]
+  \Pr\left[\textrm{group failure} \,|\, \phatraidcf{C}{f},\, n_{failure}=2(f+1)\right]
     =
   \frac{\binom{C}{2}\binom{2f+1}{f+1}^2}
        {\binom{C \cdot (2f+1)}{2(f+1)}}
@@ -624,17 +657,26 @@ given $2(f + 1)$ node failures is:
 For \phatraidcf{6}{1} we calculate:
 
 \begin{align*}
-  P\left[\textrm{group failure} \,|\, \phatraidcf{6}{1}, n_{failure}=4\right]
+  P\left[\textrm{group failure} \,|\, \phatraidcf{6}{1},\, n_{failure}=4\right]
     = \frac{135}{3000} \approx 0.05
 \end{align*}
 
 \subsection{Performance}
 
+
+
 \section{Future Work}
 
-Extra parity bits!
+We would like to consider adding more than one parity bit. For some
+applications, the diminishing returns on latency are not worth the loss of
+failures. In that case, we would do well to add more parity bits, thus allowing
+more clusters to completely fail.
 
 \section{Conclusion}
+
+We've presented RAID on a distributed file system which shows that sharding
+files improves latency for large files while maintaining reasonable failure
+probabilities.
 
 \bibliographystyle{plain}
 \bibliography{paper}
