@@ -496,7 +496,7 @@ of data are complicated by the combination of RAID and VR.
       \node[rotate=25] (N) at (1.5,-1.5) {\textsc{Impossible!}};
     \end{tikzpicture}
     \caption{Progress, Data Loss}
-    \label{fig:failures_max}
+    \label{fig:failures_impossible}
   \end{subfigure}
 ~
   \begin{subfigure}{0.4\textwidth}
@@ -508,7 +508,7 @@ of data are complicated by the combination of RAID and VR.
         \node [strike out, draw=red, thick] (pr\x\y) at (\x,-\y) {};
     \end{tikzpicture}
     \caption{No Progress, Data Loss}
-    \label{fig:failures_noprogress_nodata}
+    \label{fig:failures_noprogress_dataloss}
   \end{subfigure}
 
   \caption{Some Failed Node Distributions of \phatraidcf{3}{1}}
@@ -543,15 +543,96 @@ data cannot be recovered.
 In general, progress ceases if more than one cluster cannot reach consensus and
 data loss occurs if more than one cluster completely fails. The lower bound of
 failed nodes for progress cessation in \phatraidcf{$C$}{$f$} is:
-    $$ C\cdot(f+1) $$
+    $$ 2\cdot(f+1) $$
 and the lower bound of failed nodes for data loss is:
     $$ 2\cdot(2f+1) $$
 
 In contrast, if all data has been propagated to all nodes, data is only lost
 when all nodes die. If data has not been propagated to all nodes, then loss
-occurs if all nodes containing the data die. 
+occurs if all nodes containing the data die.
+
+\subsubsection{Theoretical Analysis}
+
+A single number cannot describe the failure threshold of a \phatraid{} cluster
+because of the interplay between VR and RAID. The failure of the \phatraid{}
+group is dependent on the arrangement of the failed nodes. For example, Figure
+\ref{fig:failures_noprogress} depicts a situation wherein only four failures
+stops progress. In contrast, Figure \ref{fig:failures_allok} depicts a situation
+wherein five failures does \emph{not} stop progress.
+
+In a \phatraidcf{3,1} group, less than one-quarter of four-failure arrangements
+stop progress. The necessary condition for progress cessation is that two or
+more clusters have lost at least $f+1$ nodes. By the pidgeon hole principle,
+only the two-in-two, four-failure arrangement stops progress. We can count the
+number of such arrangements:
+
+    $$ \binom{3}{2} \binom{3}{2}^2 = 3^3 = 27 $$
+
+The first term represents choosing the two clusters of three that will
+fail. The second term represents choosing which two nodes in each cluster of
+three nodes will fail.
+
+The total number of four-failure arrangements is simply:
+
+    $$ \binom{9}{4} = 126 $$
+
+If all nodes fail uniformly and independently, then the probability of four
+nodes causing \phatraid{} group failure is
+
+    $$ \frac{27}{126} \approx 0.21 $$
+
+When five nodes fail, they can be distributed into each group in the
+proportions: (3,1,1), (3,2,0) and (2,2,1). The first case does not stop progress
+because only one cluster fails. The later two cases stop progress because two
+clusters fail. We calculate the probability of \phatraid{} group failure when
+five nodes fail:
+
+\begin{align*}
+  \textrm{(3,1,1)}\;\;\;
+    &\binom{3}{1}\binom{3}{3}\binom{3}{1}\binom{3}{1} = 3^3 = 27 \\
+  \textrm{(3,2,0)}\;\;\;
+    &\binom{3}{1}\binom{2}{1}\binom{3}{3}\binom{3}{2} = 2\cdot3^2 = 18 \\
+  \textrm{(2,2,1)}\;\;\;
+    &\binom{3}{1}\binom{3}{2}\binom{3}{1}\binom{3}{1} = 3^4 = 81 \\
+  \textrm{5-Failure Arrs.}\;\;\;
+    &\binom{9}{5} = 126 \\
+  \textrm{Failure Prob.}\;\;\;
+    &\Pr\left[\textrm{group failure} \,|\, n_{failed} = 5\right] = \frac{81 + 18}{126} =
+    \frac{99}{126} \approx 0.79 \\
+\end{align*}
+
+A VR or PAXOS cluster of size nine is resilient to $f = 4$ failures. In
+contrast, \phatraidcf{3}{1} is absolutely resilient to $f=3$ failures, has high
+probability of resilience to $f=4$ failures, and has low probability of
+resilience to $f=5$ failures.
+
+The general formula for the failure probability distribution is not clear, but
+it is clear that a \phatraidcf{$C$}{$f$} group is absolutely resilient to $2(f +
+1) - 1$ or fewer failures. A \phatraidcf{$C$}{$f$} group is likely resilient
+to $2(f+1)$ failures and unlikely resistant to $2(f+1)+1$ failures.
+
+The general form for the probability of \phatraidcf{$C$}{$f$} group failure
+given $2(f + 1)$ node failures is:
+
+\begin{align*}
+  \Pr\left[\textrm{group failure} \,|\, \phatraidcf{C}{f}, n_{failure}=2(f+1)\right]
+    =
+  \frac{\binom{C}{2}\binom{2f+1}{f+1}^2}
+       {\binom{C \cdot (2f+1)}{2(f+1)}}
+\end{align*}
+
+For \phatraidcf{6}{1} we calculate:
+
+\begin{align*}
+  P\left[\textrm{group failure} \,|\, \phatraidcf{6}{1}, n_{failure}=4\right]
+    = \frac{135}{3000} \approx 0.05
+\end{align*}
 
 \subsection{Performance}
+
+\section{Future Work}
+
+Extra parity bits!
 
 \section{Conclusion}
 
