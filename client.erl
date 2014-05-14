@@ -2,7 +2,7 @@
 -behavior(gen_server).
 -define(NODEBUG, true). %% comment out for debugging messages
 -include_lib("eunit/include/eunit.hrl").
--export([start_link/1,start_link/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,profile/2,handle_cast/2,handle_info/2,code_change/3]).
+-export([start_link/1,start_link/2,multi_profile/2,init/1,handle_call/3,call/1,call/2,start/0,stop/0,terminate/2,profile/2,handle_cast/2,handle_info/2,code_change/3]).
 
 -define(TIMEOUT, 100000).
 
@@ -107,6 +107,30 @@ profile(Filesize, Trials) ->
         end,
         io:fwrite("Store Time: ~p ms -- Fetch Time: ~p ms ~n", [TimeStore / 1000, TimeFetch / 1000])
     end, lists:seq(1, Trials)),
+    call({clear}).
+
+
+multi_profile(Filesize, Trials) ->
+    File = list_to_binary([48 || Num <- lists:seq(0, Filesize-1)]),
+    {TimeStore, _V} = timer:tc(fun () -> 
+        lists:map(fun(I) ->
+            Filename = ["file" ++ [(I + 48)]],
+            _Val = call({mkfile, {handle,[]}, Filename, ""}),
+            call({putcontents, {handle, Filename}, File}),
+            ok
+        end, 
+        lists:seq(1, Trials)) 
+    end),
+    call({getroot}), % flush the commit pipelineeee ( ask lucas )
+    {TimeFetch, _V2} = timer:tc(fun () -> 
+        lists:map(fun(I) ->
+            Filename = ["file" ++ [(I + 48)]],
+            call({getcontents, {handle, Filename}}),
+            ok
+        end, 
+        lists:seq(1, Trials)) 
+    end),
+    io:fwrite("Trials: ~p Avg Store Time: ~p ms -- Avg Fetch Time: ~p ms ~n", [Trials, TimeStore / Trials / 1000, TimeFetch / Trials / 1000]),
     call({clear}).
 
 

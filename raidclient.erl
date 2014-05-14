@@ -5,7 +5,7 @@
 -export([start_link/1,init/1,handle_call/3,call/1,stop/0,handle_cast/2,terminate/2]).
 -export([code_change/3,handle_info/2,xor_all/1,binary_bxor/2,store_chunk/5,get_chunk/4]).
 -export([dotestloop/1,testloop/1]).
--export([profile/2]).
+-export([profile/2, multi_profile/2]).
 
 -define(TIMEOUT, 100000).
 -define(MB_PER_BYTE, 1). 
@@ -176,6 +176,27 @@ profile(Filesize, Trials) ->
         end,
         io:fwrite("Store Time: ~p ms -- Fetch Time: ~p ms ~n", [TimeStore / 1000, TimeFetch / 1000])
     end, lists:seq(1, Trials)),
+    call({clear}).
+
+
+multi_profile(Filesize, Trials) ->
+    File = [48 || Num <- lists:seq(0, Filesize-1)],
+    {TimeStore, _V} = timer:tc(fun () -> 
+        lists:map(fun(I) ->
+            call({store, ["file" ++ I + 48], File}),
+            ok
+        end, 
+        lists:seq(1, Trials)) 
+    end),
+    call({getroot}), % flush the commit pipelineeee ( ask lucas )
+    {TimeFetch, _V2} = timer:tc(fun () -> 
+        lists:map(fun(I) ->
+            call({get, ["file" ++ I + 48]}),
+            ok
+        end, 
+        lists:seq(1, Trials)) 
+    end),
+    io:fwrite("Trials: ~p Avg Store Time: ~p ms -- Avg Fetch Time: ~p ms ~n", [Trials, TimeStore / Trials / 1000, TimeFetch / Trials / 1000]),
     call({clear}).
 
 test() ->

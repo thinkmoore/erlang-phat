@@ -45,10 +45,10 @@ startPrepare(NodeName, Client, RequestNum, Op) ->
 master(timeout, #{ allNodes := AllNodes, masterNode := MasterNode, 
     commitNumber := CommitNumber, viewNumber := ViewNumber, timeout := Timeout} = State) ->
     ?debugFmt("idle, sending commit~n", []),
-    sendToReplicas(MasterNode, AllNodes, {commit, ViewNumber, CommitNumber}),
+    sendToReplicas(MasterNode, AllNodes, {commit, true, ViewNumber, CommitNumber}),
     {next_state, master, State, Timeout};
 
-master({commit, MasterViewNumber, _}, #{ viewNumber := ViewNumber } = State)
+master({commit, _A, MasterViewNumber, _}, #{ viewNumber := ViewNumber } = State)
     when MasterViewNumber > ViewNumber ->
     io:fwrite("In bad view MasterViewNumber: ~p ViewNumber ~p~n", [MasterViewNumber,ViewNumber]),
     startRecovery(State);
@@ -89,8 +89,8 @@ master({prepareOk, ViewNumber, _, _}, #{ viewNumber := MasterViewNumber,
     {next_state, master, State, Timeout};
 
 master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
-    #{ masterBuffer := MasterBuffer, allNodes := AllNodes, timeout := Timeout,
-        uncommittedLog := UncommittedLog, commitNumber := CommitNumber } = State) ->
+    #{ masterBuffer := MasterBuffer, allNodes := AllNodes, timeout := Timeout, viewNumber := ViewNumber,
+        uncommittedLog := UncommittedLog, masterNode := MasterNode, commitNumber := CommitNumber } = State) ->
     ?debugFmt("received prepareok ~p~n", [Msg]),
     F = (length(AllNodes) - 1) / 2,
     MB = case dict:find(OpNumber, MasterBuffer) of
@@ -111,6 +111,8 @@ master({prepareOk, _, OpNumber, ReplicaNode} = Msg,
     AllOks = dict:fetch(OpNumber, MB),
     if
         length(AllOks) >= F -> 
+            %% XXX
+            sendToReplicas(MasterNode, AllNodes, {commit, false, ViewNumber, OpNumber}),
             {NLog, CTable} = doCommits(CommitNumber, OpNumber, lists:sort(UncommittedLog), State),
             {next_state, master, State#{ masterBuffer := MB, 
                 commitNumber := OpNumber, uncommittedLog := NLog, clientsTable := CTable }, Timeout};
@@ -131,7 +133,7 @@ master(UnknownMessage, #{ timeout := Timeout } = State) when UnknownMessage =/= 
 
 doCommits(_, _, [], #{ clientsTable := ClientsTable }) -> {[], ClientsTable};
 doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn, 
-    clientsTable := ClientsTable } = State) ->
+    clientsTable := ClientsTable, allNodes := AllNodes, viewNumber := ViewNumber } = State) ->
     {[{ON, Op, C, RN} = Entry], Rest} = lists:split(1, UncommittedLog),
     if
         (ON > From) and (ON =< To) ->
@@ -154,21 +156,21 @@ doCommits(From, To, UncommittedLog, #{ log := Log, commitFn := CommitFn,
 %% REPLICA CODE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-replica({commit, MasterViewNumber, _}, #{ viewNumber := ViewNumber} = State)
+replica({commit, _A, MasterViewNumber, _}, #{ viewNumber := ViewNumber} = State)
     when MasterViewNumber > ViewNumber ->
     ?debugFmt("my view is out of date, need to recover~n", []),
     startRecovery(State);
 
-replica({commit, MasterViewNumber, _}, #{ timeout := Timeout,
+replica({commit, _A, MasterViewNumber, _}, #{ timeout := Timeout,
     viewNumber := ViewNumber} = State)
     when MasterViewNumber < ViewNumber ->
     ?debugFmt("ignoring prepare from old view~n", []),
     {next_state, replica, State, Timeout};
 
-replica({commit, _, MasterCommitNumber}, 
+replica({commit, ShouldSendPrepareOk, _, MasterCommitNumber}, 
     #{ prepareBuffer := PrepareBuffer, opNumber := OpNumber } = State) ->
     ?debugFmt("got commit request~n", []),
-    processPrepareOrCommit(OpNumber, MasterCommitNumber, PrepareBuffer, State);
+    processPrepareOrCommit(OpNumber, MasterCommitNumber, PrepareBuffer, State, ShouldSendPrepareOk);
 
 replica({clientRequest, Client, _, _}, #{ timeout := Timeout } = State) ->
     ?debugFmt("Got client request as replica~n", []),
@@ -191,7 +193,7 @@ replica({prepare, _, Op, OpNumber, MasterCommitNumber, Client, RequestNum},
     #{ prepareBuffer := PrepareBuffer } = State) ->
     Message = {OpNumber, Op, Client, RequestNum},
     NewPrepareBuffer = lists:sort([Message|PrepareBuffer]),
-    processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, State);
+    processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, State, true);
 
 replica(timeout, #{ viewNumber := ViewNumber, myNode := MyNode, allNodes := Nodes, 
     timeout := Timeout, masterNode := MasterNode } = State) ->
@@ -381,7 +383,7 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
        masterNode := MasterNode,
        myNode := MyNode,
        viewNumber := ViewNumber,
-       allNodes := Nodes} = State)
+       allNodes := Nodes} = State, ShouldSendPrepareOk)
   when CommitNumber > MasterCommitNumber ->
     NewViewNumber = ViewNumber + 1,
     NewMaster = chooseMaster(State, NewViewNumber),
@@ -393,7 +395,7 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
         masterNode := NewMaster }, Timeout };
 
 processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer, 
-    #{ timeout := Timeout } = State) ->
+    #{ timeout := Timeout } = State, ShouldSendPrepareOk) ->
     AfterBuffer = processBuffer(State#{ prepareBuffer := NewPrepareBuffer }, 
         NewPrepareBuffer, MasterCommitNumber),
     AfterLog = processLog(AfterBuffer, MasterCommitNumber),
@@ -404,11 +406,14 @@ processPrepareOrCommit(OpNumber, MasterCommitNumber, NewPrepareBuffer,
             % todo send getstate
             ?debugFmt("missed an op, need to recover", []),
             startRecovery(State);
-        true ->
+        ShouldSendPrepareOk ->
             ?debugFmt("replica completed up to K=~p,O=~p~n", [CommitNumber, OpNumber]),
-            sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode}),
-            {next_state, replica, AfterLog, Timeout}
-    end.
+            sendToMaster(MasterNode, {prepareOk, ViewNumber, OpNumber, MyNode});
+        true ->
+            ok   
+    end,
+    {next_state, replica, AfterLog, Timeout}.
+    
 
 processBuffer(State, [], _) -> State;
 processBuffer(#{ clientsTable := ClientsTable, opNumber := GlobalOpNumber, log := Log } = State, 
