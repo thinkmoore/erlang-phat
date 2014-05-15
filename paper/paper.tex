@@ -137,6 +137,14 @@ sharded and disk latency is reduced proportional to number of clusters. Failure
 resiliency is not completely sacrificed and we provide an analysis of the
 new failure modes.
 
+Our setting is in a data center where we have low network latency,
+high network throughput, and the need to store large files with tolerance to
+some CPU, network, and disk failure. We reason that with these characteristics,
+disk read/write latency will be the major factor in overall latency to store a file
+with replication. As a result, we borrow ideas from RAID that allow for faster
+disk access, and mix them with ideas for distributed consensus algorithms that
+allow for consistent replication.
+
 \subsection{Disk Performance}
 
 An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system.
