@@ -149,7 +149,7 @@ allow for consistent replication.
 
 An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system.
 
-In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) were compared with Solid State Drives (SSD). HDDs use a physical magnetic platter that spins so that a drive head can read or write data by sensing or manipulating the magnetic field in a particular position on to the platter. In contrast, SSDs have no moving parts and instead uses integrated circuits as memory to store data persistently. Because the way in which data is accessed is different, the performance characteristics between the two are different.
+In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) were compared with Solid State Drives (SSD). HDDs use a physical magnetic platter that spins so that a drive head can read or write data by sensing or manipulating the magnetic field in a particular position on the platter. In contrast, SSDs have no moving parts and instead uses integrated circuits as memory to store data persistently. Because the way in which data is accessed is different, the performance characteristics between the two are different.
 
 \begin{figure}
 \centering
@@ -158,7 +158,7 @@ In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) we
 \label{fig:hdd-vs-sdd}
 \end{figure}
 
-Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SSD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SSDs do not exhibit this problem as there is no spinning platter. The right diagram in \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk. Additionally, HDDs have difficultly with random accesses as the drive may need to wait for the drive head to be directly over the correct position on the platter. This problem becomes especially apparent when an individual file is fragmented into multiple blocks by the file system. SSDs have relatively better random access times, in general, than HDDs. Sequential access tends to be many times faster than random access for both SSDs and HDDs \cite{disk-perf}. HDD performance can also can suffer from {\em spin-up delay}, which happens as a result of a power-saving measure that stops spinning the disk during idle times.
+Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SSD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SSDs do not exhibit this problem as there is no spinning platter. The left diagram in Figure \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk. Additionally, HDDs have difficultly with random accesses as the drive may need to wait for the drive head to be directly over the correct position on the platter. This problem becomes especially apparent when an individual file is fragmented into multiple blocks by the file system. SSDs have relatively better random access times, in general, than HDDs. Sequential access tends to be many times faster than random access for both SSDs and HDDs \cite{disk-perf}. HDD performance can also can suffer from {\em spin-up delay}, which happens as a result of a power-saving measure that stops spinning the disk during idle times.
 
 We decided that HDDs have far too much performance variability in order to be properly modeled. As a result, we instead chose to simulate the performance characteristics of SSDs as they have relatively constant access times regardless of sector position on the drive and also do not suffer from {\em spin-up delay}.
 
@@ -274,9 +274,9 @@ or read from the drive.
 Instead of sending very large files, we sent smaller strings that were treated by the 
 DEAL as being much larger (e.g. 1 character represented 1MB of data). As a result,
 we extended the DEAL to perform an additional delay for performing bitwise XOR
-on file as that was the only operation on a file. In our model, drive delays were
-much greater than XOR delays (e.g. 20 GB/second XOR delay versus 200 MB/second
-drive delay).
+on a file as that was the only other operation on a file for our tests. 
+In our model, drive delays were much greater than XOR delays (e.g. 20 GB/second 
+XOR delay versus 200 MB/second drive delay).
 
 \subsection{RAIDing \phat{}}
 
