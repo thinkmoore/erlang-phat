@@ -731,14 +731,15 @@ For example, for a \phatraidcf{6}{1} we calculate:
 \subsection{Performance}
 
 \begin{figure}
-  \includegraphics[scale=0.45]{Store.pdf}
+  \centering
+  \includegraphics[scale=0.5]{Store.png}
   \caption{Scatter Plot of Various \phatraidcf{$C$}{$f$} Configurations}
   \label{fig:plot}
 \end{figure}
 
 We evaluated a prototype \phatraidcf{$C$}{$f$} implementation. We simulated disk
 latency with sleeps. All experiments are run on a 2013-model MacBook Pro with
-8GB of RAM, and a 3GHz Intel Core i7. We found that latency scales as
+8GB of RAM, and a 3GHz Intel Core i7. We found that latency scales asp
 $\frac{1}{C-1}$. This is the expected behavior for breaking a file into $C-1$
 chunks. We always use one bit of party.
 
@@ -762,11 +763,11 @@ applications, the diminishing returns on latency are not worth the loss of
 failures. In that case, we would do well to add more parity bits, thus allowing
 more clusters to completely fail.
 
-We would like to perform a real evaluation rather than a simulation. 
-It seems that as file size increases, PhatRaid becomes more appealing 
-for lower commit latency. It is not clear from our
-simulation, however, when the file size is small enough for other effects (such as
-network latency, communications overhead) to become more important.
+We would like to perform a real evaluation rather than a simulation.  It seems
+that as file size increases, PhatRaid becomes more appealing for lower commit
+latency. It is not clear from our simulation, however, when the file size is
+small enough for other effects (such as network latency, communications
+overhead) to become more important.
 
 \section{Conclusion}
 
