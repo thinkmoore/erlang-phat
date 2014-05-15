@@ -189,6 +189,7 @@ identifiers.
 \subsection{System Organization}
 
 \begin{figure}
+\hspace*{-.43in}
   \centering
   \begin{tikzpicture}
     [<->,scale=.85,shorten <=2pt, shorten >=2pt,]
@@ -702,6 +703,13 @@ We would like to consider adding more than one parity bit. For some
 applications, the diminishing returns on latency are not worth the loss of
 failures. In that case, we would do well to add more parity bits, thus allowing
 more clusters to completely fail.
+
+We would like to perform a real evaluation rather than a simulation. 
+It seems that as file size increases, PhatRaid becomes more appealing 
+for lower commit latency. It is not clear from our
+simulation, however, when the file size is small enough for other effects (such as
+network latency, communications overhead) to become more important. And, as a 
+result, PhatRaid having no improvements (or possibly worse performance). 
 
 \section{Conclusion}
 
