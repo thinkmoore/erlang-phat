@@ -139,7 +139,7 @@ new failure modes.
 
 \subsection{Disk Performance}
 
-An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system. {\bf TODO more}
+An important consideration in our project is the impact disk performance has on overall commit latency. We believe that disk read/write latency is the major contributor to storing large files in a distributed system.
 
 In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) were compared with Solid State Drives (SSD). HDDs use a physical magnetic platter that spins so that a drive head can read or write data by sensing or manipulating the magnetic field in a particular position on to the platter. In contrast, SSDs have no moving parts and instead uses integrated circuits as memory to store data persistently. Because the way in which data is accessed is different, the performance characteristics between the two are different.
 
@@ -165,10 +165,10 @@ Sequential Read Speed &  207.95 - 522.45 MB/sec \\
 Read Access Time & 0.03 - 0.22 ms \\ \hline
 \end{tabular}
 \caption[Solid State Performance]{Solid State Disk performance for middle 95\% of solid state drives tested in a benchmark. Benchmark available at Benchmark available at \hwbenchmark.}
-\label{fig:sdd-perf}
+\label{fig:ssd-perf}
 \end{figure}
 
-Figure \ref{fig:sdd-perf} shows the performance for SSDs from a 2013 survey of commercially available SSDs. Sequential write speeds measure the throughput (in megabytes per second) of data stored on the drive when the data is being written in the drive's natural sequential order (e.g. increasing sectors). Similarly, sequential read speed measures the throughput for sequential reads. Read/Write access times represent the latency of performing a single random read or write. 
+Figure \ref{fig:ssd-perf} shows the performance for SSDs from a 2013 survey of commercially available SSDs. Sequential write speeds measure the throughput (in megabytes per second) of data stored on the drive when the data is being written in the drive's natural sequential order (e.g. increasing sectors). Similarly, sequential read speed measures the throughput for sequential reads. Read/Write access times represent the latency of performing a single random read or write. 
 
 \section{Implementation}
 
@@ -250,7 +250,24 @@ communicate. The raid-client and client processes all live on one node. Each
 \subsection{Disk Emulation and Abstraction Layer}
 
 We developed a novel ``{\bf {\em Disk Emulation and Abstraction Layer}}'' (DEAL)
-to simulate SSD performance so they .
+to simulate SSD performance for our evaluation. The DEAL simulates read and 
+write delay using the information from Figure \ref{fig:ssd-perf}. We calculate disk delay as:
+
+\begin{align}
+\textsc{ReadDelay}(x) =&\ x / \textsc{SeqReadSpeed} + \textsc{ReadAccessTime}\\
+\textsc{WriteDelay}(x) =&\ x / \textsc{SeqWriteSpeed} + \textsc{WriteAccessTime}
+\end{align}
+
+where $x$ is the size of the file. During filesystem operations, these formulas are
+used to put the process to sleep in proportion to the size of the file being written to
+or read from the drive. 
+
+Instead of sending very large files, we sent smaller strings that were treated by the 
+DEAL as being much larger (e.g. 1 character represented 1MB of data). As a result,
+we extended the DEAL to perform an additional delay for performing bitwise XOR
+on file as that was the only operation on a file. In our model, drive delays were
+much greater than XOR delays (e.g. 20 GB/second XOR delay versus 200 MB/second
+drive delay).
 
 \subsection{RAIDing \phat{}}
 
