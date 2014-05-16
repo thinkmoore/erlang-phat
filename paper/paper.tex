@@ -126,7 +126,7 @@ and CS260r's \phat{}\cite{class}, send all files through a single
 master node which consistently replicates the file on many slaves. In
 this scheme, the master node's throughput is a bottleneck for storing
 large files. We present \phatraid{} which mitigates this bottleneck by
-partitioning files across many \paxos{} groups which form a \raid{1}
+partitioning files across many \paxos{} groups which form a \raid{}\cite{raid}
 group.
 
 \section{Introduction}
@@ -134,7 +134,7 @@ group.
 Google's \chubby{}\cite{burrows-chubby} is a distributed file system which
 achieves consensus in the face of limited failures. Unfortunately, for storing
 large files disk latency on the cluster nodes is a bottleneck. We propose
-building a RAID group out of distributed file system clusters. Large files are
+building a RAID (Redundant Array of Inexpensive Disks)\cite{raid} group out of distributed file system clusters. Large files are
 sharded and disk latency is reduced proportional to number of clusters. Failure
 resiliency is not completely sacrificed and we provide an analysis of the
 new failure modes.
