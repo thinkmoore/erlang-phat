@@ -115,17 +115,19 @@
 
 \begin{document}
 
-\title{PHAT RAID, yo}
+\title{\phatraid, yo}
 \author{Andrew Johnson \and Daniel King \and Lucas Waye \and Scott Moore}
 \date{May 13, 2014}
 
 \maketitle
 
-Distributed file stores, like Google's \chubby{} and CS260r's \phat{}, send all
-files through a single master node which consistently replicates the file on
-many slaves. In this scheme, the master node's throughput is a bottleneck for
-storing large files. We present \phatraid{} which mitigates this bottleneck by
-partitioning files across many \paxos{} groups which form a \raid{1} group.
+Distributed file stores, like Google's \chubby{}\cite{burrows-chubby}
+and CS260r's \phat{}\cite{class}, send all files through a single
+master node which consistently replicates the file on many slaves. In
+this scheme, the master node's throughput is a bottleneck for storing
+large files. We present \phatraid{} which mitigates this bottleneck by
+partitioning files across many \paxos{} groups which form a \raid{1}
+group.
 
 \section{Introduction}
 
@@ -138,10 +140,10 @@ resiliency is not completely sacrificed and we provide an analysis of the
 new failure modes.
 
 Our setting is in a data center where we have low network latency, high network
-throughput, and the need to store large files with tolerance to some CPU,
-network, and disk failure. In this setting, we reason that the major bottleneck
+throughput, and the need to dependably store large files with tolerance to some CPU,
+network, and disk failure. In this setting, we hypothesize that the major bottleneck
 for replicated file storage is disk read/write latency. We combat this
-bottleneck with ideas from RAID, which allow for faster disk access, and ideas
+bottleneck with ideas from RAID, which allow for faster file access, and ideas
 from distributed consensus algorithms, which allow for consistent replication.
 
 \subsection{Disk Performance}
@@ -157,9 +159,33 @@ In a review of hard disk performance \cite{disk-perf}, Hard Disk Drives (HDD) we
 \label{fig:hdd-vs-sdd}
 \end{figure}
 
-Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for a SSD and HDD as a function of position on the disk. HDD storage performance is greatly influenced by where on the disk platter the data was placed. Data can be placed on the outer rim of the platter much more quickly than data placed near the center of the platter as the outer rim is moving faster in comparison (due to conservation of angular momentum). In contrast to HDDs, SSDs do not exhibit this problem as there is no spinning platter. The left diagram in Figure \ref{fig:hdd-vs-sdd} shows relatively constant read performance throughout the entire disk. Additionally, HDDs have difficultly with random accesses as the drive may need to wait for the drive head to be directly over the correct position on the platter. This problem becomes especially apparent when an individual file is fragmented into multiple blocks by the file system. SSDs have relatively better random access times, in general, than HDDs. Sequential access tends to be many times faster than random access for both SSDs and HDDs \cite{disk-perf}. HDD performance can also can suffer from {\em spin-up delay}, which happens as a result of a power-saving measure that stops spinning the disk during idle times.
+Figure \ref{fig:hdd-vs-sdd} shows a comparison between read times for
+a SSD and HDD as a function of position on the disk. HDD storage
+performance is greatly influenced by where on the disk platter the
+data was placed. Data can be placed on the outer rim of the platter
+much more quickly than data placed near the center of the platter as
+the outer rim is moving faster in comparison (due to conservation of
+angular momentum). In contrast to HDDs, SSDs do not exhibit this
+problem as there is no spinning platter. The left diagram in Figure
+\ref{fig:hdd-vs-sdd} shows relatively constant read performance
+throughout the entire disk. Additionally, HDDs have difficultly with
+random accesses as the drive may need to wait for the drive head to be
+directly over the correct position on the platter. This problem
+becomes especially apparent when an individual file is fragmented into
+multiple blocks by the file system. SSDs have better random access
+times, in general, than HDDs. Sequential access tends to be many times
+faster than random access for both SSDs and HDDs \cite{disk-perf}. HDD
+performance can also can suffer from {\em spin-up delay}, which
+happens as a result of a power-saving measure that stops spinning the
+disk during idle times.
 
-We decided that HDDs have far too much performance variability in order to be properly modeled. As a result, we instead chose to simulate the performance characteristics of SSDs as they have relatively constant access times regardless of sector position on the drive and also do not suffer from {\em spin-up delay}.
+We decided that HDDs have far too much performance variability in
+order to be properly modeled. As a result, we instead chose to
+simulate the performance characteristics of SSDs as they have
+relatively constant access times regardless of sector position on the
+drive and also do not suffer from {\em spin-up delay}. Also, because
+HDDs are slower, and our hypothesis supposes that disk is the
+bottleneck, this should be a more challenging case for \phatraid{}.
 
 \urldef\hwbenchmark\url{http://www.tomshardware.com/charts/ssd-charts-2013/benchmarks%2C129.html}
 \begin{figure}
@@ -189,7 +215,8 @@ processes. Erlang nodes may live on the same machine or on different machines
 connected by a network. Every Erlang node is given a name by an Erlang name
 server. Erlang processes may communicate with any Erlang node or process it can
 name. Erlang processes interact with one another by making RPC calls or sending
-messages. Identifiers beginning with a lowercase letter are actually atoms, like
+messages. Identifiers beginning with a lowercase letter are actually
+\emph{atoms}, a literal constant similar to
 Scheme and Lisp's symbols. Identifiers beginning with an uppercase letter are
 normal identifiers.
 
@@ -240,8 +267,9 @@ normal identifiers.
 
 \phatraid{} is implemented in Erlang, reusing our previous implementation of
 \phat{}. The implementation is divided into three domains: the server cluster,
-the client, and the raid-client. The server code implements a VR-like consensus
-algorithm as well as simple file system. The client code exposes a file system
+the client, and the raid-client. The server code implements a variant
+of the Viewstamped Replication (VR)~\cite{liskov2012viewstamped} consensus
+algorithm as well a file system. The client code exposes a file system
 API which hides the communication bookkeeping. The raid-client provides a file
 system API which transparently partitions files and reassembles them as they are
 sent and received from the server cluster.
@@ -250,10 +278,11 @@ Figure \ref{fig:organization} depicts the organization of our system. The
 raid-client delegates communication to each client. Each client is connected to
 one \phat{} cluster, which has a master and a number of replicas.
 
-Each \phat{} cluster maintains a file system which is separate and distinct from
-the file systems of other \phat{} clusters. Generally, two phat clusters do not
-communicate. The raid-client and client processes all live on one node. Each
-\phat{} master and \phat{} replica lives on its own node.
+The master and each replica in a \phat{} cluster maintains a separate
+file system. Two different phat clusters do not communicate
+directly. The raid-client and client processes all live on one Erlang
+node. Each \phat{} master and \phat{} replica lives on its own Erlang
+node along with its file system.
 
 \subsection{Disk Emulation and Abstraction Layer}
 
@@ -275,7 +304,7 @@ DEAL as being much larger (e.g. 1 character represented 1MB of data). As a resul
 we extended the DEAL to perform an additional delay for performing bitwise XOR
 on a file as that was the only other operation on a file for our tests. 
 In our model, drive delays were much greater than XOR delays (e.g. 20 GB/second 
-XOR delay versus 200 MB/second drive delay).
+XOR throughput versus 200 MB/second drive throughput).
 
 \subsection{RAIDing \phat{}}
 
@@ -285,8 +314,8 @@ single \phat{} cluster contains $2f + 1$ nodes. A \phatraid{} group contains $C$
 clusters for a total of $C(2f+1)$ \phat{} nodes. A \phatraid{} group can be
 concurrently accessed by an arbitrary number of raid-clients.
 
-On a client node, the raid-client spawns $C$ client processes which each
-maintain a connection to one of the $C$ \phat{} clusters. Each client process
+On a raid-client node, $C$ client processes are spawned each of which
+maintains a connection to one of the $C$ \phat{} clusters. Each client process
 mediates communication between its assigned \phat{} cluster and the raid-client.
 
 A store operation on the raid-client breaks the file into $C-1$ chunks, stores
@@ -304,19 +333,19 @@ The master and each replica have four components: the supervisor, the server,
 VR, and the file system:
 
 \begin{itemize}
-\item the supervisor -- restarts the other three processes if any single node dies
+\item the supervisor -- restarts the other three processes if any dies
 \item the server -- passes messages to the VR process if this node is the
   \phat{} master; otherwise, it drops the message and informs the client of the
   current master node
 \item VR -- maintains a log of opaque messages, achieving consensus with other
   nodes in the cluster via the Viewstamped Replication protocol
-\item the file system -- maintains a simple hierarchical file system with locks
+\item the file system -- maintains a hierarchical file system with locks
 \end{itemize}
 
 \subsection{Erlang Behaviors}
 
 The four components are implemented using Erlang behaviors. An Erlang behavior
-is a framework which implements common patterns like servers and finite state
+is a framework which implements common patterns like servers and finite-state
 machines. In particular, the supervisor uses the \texttt{supervisor} behavior,
 the server and file system both use the \texttt{gen\_server} behavior, and VR
 uses the \texttt{gen\_fsm} behavior.
@@ -328,10 +357,11 @@ uses the \texttt{gen\_fsm} behavior.
   single-server interactions. We implemented functions to process messages
   formatted as Erlang tuples. The \texttt{gen\_server} behavior handles
   low-level socket interaction, messaging queueing, etc.
-\item The \texttt{gen\_fsm} behavior generalizes the \texttt{gen\_server}
-  behavior by permitting the server to have a finite number of states. Each
-  state has a set of functions with which to process messages. This behavior can
-  be seen as an ad hoc polymorphic variant of the \texttt{gen\_server} behavior.
+\item The \texttt{gen\_fsm} (finite-state machine) behavior
+generalizes the \texttt{gen\_server} behavior by permitting the server
+to have a finite number of states. Each state has a set of functions
+with which to process messages. This behavior can be seen as an ad hoc
+polymorphic variant of the \texttt{gen\_server} behavior.
 \end{itemize}
 
 Additionally, the \texttt{gen\_server} and \texttt{gen\_fsm} behaviors allow the
@@ -465,7 +495,8 @@ protocol \cite{liskov2012viewstamped}. Listing \ref{lst:genfsm} defines how to
 handle prepare messages sent to a node in the replica state. It is piecewise
 defined by pattern matching on the arguments. The first two definition clauses
 use the \lstinline!when! keyword to specify arbitrary required relationships
-between the matched variables.
+between the matched variables.\footnote{\lstinline{?debugFmt} is a macro
+    for printing debug messages when a flag is set}
 
 The final definition clause triggers when the replica receives a message in the
 current view. The replica adds the message to a sorted queue and calls a
@@ -490,7 +521,7 @@ messages have now been received. The call to \lstinline!processLog! commits
 logged messages which have been newly committed by the master node. Lines
 405--408 destructure \lstinline!AfterLog! and bind variables for later use. The
 final \lstinline!if! statement responds to the master unless the master has
-committed messages we haven't yet received.\footnote{This can happen if the
+committed messages the replica has not yet received.\footnote{This can happen if the
   network drops a message whose operation number lies between the replica's last
   commit number and the master's last commit number.}
 
@@ -499,7 +530,7 @@ committed messages we haven't yet received.\footnote{This can happen if the
 \subsection{Resilience}
 
 We distinguish between two types of failure: cessation of progress and loss of
-data. In a VR cluster without persistent stores, data loss of fully propagated,
+data. In a VR cluster data loss of fully propagated,
 commited data only occurs when all $2f+1$ nodes in the cluster fail \footnote{If
   more than $f+1$ nodes die some ``commited but not fully propogated data'' can
   be lost}. In a VR cluster, progress only ceases if $f+1$ nodes are lost. In
@@ -553,40 +584,43 @@ complicated by the combination of RAID and VR.
     \label{fig:failures_noprogress_dataloss}
   \end{subfigure}
 
-  \caption{Some Failed Node Distributions of \phatraidcf{3}{1}}
+  \caption{Some Failed Node Distributions of \phatraidcf{3}{1}. Each
+    circle represent a singe VR master or replica and each column is a
+  single \phat{} cluster. The red lines indicate failures.}
   \label{fig:failures}
 \end{figure}
 
-Four arrangements of failed nodes in \phatraidcf{3}{1} are depicted in Figure
-\ref{fig:failures}. In this section, ``data is lost'' means that, if no
-persistent, fail-safe store is used, some data will be lost. Adding a
-persistent, fail-safe store obviously prevents loss of committed
-data. Additionally, we assume node failures are independent and uniformly
-distributed throughout the \phatraid{} group.
+Four arrangements of node failures in \phatraidcf{3}{1} are depicted in
+Figure \ref{fig:failures}. There are three columns, each representing
+a \phat cluster of three nodes. The red lines indicate failures. We
+assume failures are independent and uniformly distributed
+throughout the \phatraid{} group.
 
 The top left corner, Figure \ref{fig:failures_allok}, depicts five of the nine
 nodes failing. This state is \emph{not} a failure state. The group can still
 make progress and no data is lost. The two surviving clusters can reach
-consensus on new values and can reconstruct the failed cluster's data.
+consensus on new values and can reconstruct the failed cluster's data
+(by taking the XOR of the data on the two surviving clusters).
 
 The top right corner, Figure \ref{fig:failures_noprogress}, depicts four of the
 nine nodes failing. This state is a failure state. The group cannot make
-progress; however, no data can been lost\footnote{Here and later in this paper
+progress; however, no data can been lost.\footnote{Here and later in this paper
   we mean that no data which has been decided and propagated throughout the
-  cluster can be lost. In VR, by contrast, if data is decided and propagated
-  throughout the cluster, that data can only be lost if every node is lost. We
-  also assume the nodes do not have persistent, fail-safe stores.}. Progress is
-blocked because more than one cluster cannot reach consensus. Since no cluster
+  cluster can be lost. In VR and normal \phat, by contrast, if data is decided and propagated
+  throughout the cluster, that data can only be lost if every node is lost.} Progress is
+blocked because more than one cluster is unable to reach consensus. Since no cluster
 was completely destroyed, all data still exists on at least one node.
 
 The bottom left corner, Figure \ref{fig:failures_impossible}, is impossible
-because the group certainly cannot make progress if data has been lost.
+because the group cannot make progress if data has been lost.
 
 The bottom right corner, Figure \ref{fig:failures_noprogress_dataloss}, depicts
 six of the nine nodes failing. This state is also a failure state. The group
 cannot make progress and will lose data. Progress is blocked because more than
-one cluster cannot reach consensus. Additionally, two complete clusters have
-been lost so half of the data cannot be recovered.
+one cluster is unable to reach consensus. Additionally, two complete clusters have
+been lost so at least half of the data cannot be recovered.\footnote{If
+  only the cluster with the parity bit remains then all useable data
+  has been lost}
 
 \subsubsection{Theoretical Analysis}
 
@@ -601,20 +635,20 @@ and the lower bound of failed nodes for data loss is:
 
     $$ 2\cdot(2f+1) $$
 
-By the pidgeon hole principle, the upper bound of failed nodes which still
+The upper bound of failed nodes which still
 permit progress is:
 
     $$ (C-1)\cdot f + 2f + 1 $$
 
-because $C-1$ clusters can make progress, i.e. at least $f+1$ nodes are up in
+because $C-1$ clusters could still make progress, e.g. if at least $f+1$ nodes are up in
 each cluster, and only one cluster is completely dead.
 
 The upper bound for no data loss is:
 
     $$ (C-1)\cdot 2f + 2f + 1 $$
 
-because $C-1$ clusters have at least one node up and one cluster has no nodes
-up.
+because it is possible that $C-1$ clusters have at least one node up
+and only one cluster has no nodes up.
 
 The bounds presented above cannot fully describe the failure threshold of a
 \phatraid{} cluster because of the interplay between VR and RAID. Instead, we
@@ -627,8 +661,8 @@ situation wherein five failures does \emph{not} stop progress.
 
 In a \phatraidcf{3}{1} group, less than one-quarter of four-failure arrangements
 stop progress. The necessary condition for progress cessation is that two or
-more clusters have lost at least $f+1$ nodes. By the pidgeon hole principle,
-only the two-in-two, four-failure arrangement stops progress. We can count the
+more clusters have lost at least $f+1$ nodes.
+Only the two-in-two, four-failure arrangement stops progress. We can count the
 number of such arrangements:
 
     $$ \binom{3}{2} \binom{3}{2}^2 = 3^3 = 27 $$
@@ -646,7 +680,7 @@ nodes causing \phatraid{} group failure is
 
     $$ \frac{27}{126} \approx 0.21 $$
 
-When five nodes fail, they can be distributed into each group in three different
+When five nodes fail, they can be distributed into each cluster in three different
 ways: (3,1,1), (3,2,0) and (2,2,1). The first case does not stop progress
 because only one cluster fails. The later two cases stop progress because two
 clusters fail. We calculate the probability of \phatraid{} group failure when
@@ -671,9 +705,10 @@ contrast, \phatraidcf{3}{1} is absolutely resilient to $f=3$ failures, has high
 probability of resilience to $f=4$ failures, and has low probability of
 resilience to $f=5$ failures.
 
-The general formula for the failure probability distribution is not clear, but
+The general formula for the failure probability distribution is left
+as an exercise for the reader, but
 it is clear that a \phatraidcf{$C$}{$f$} group is absolutely resilient to $2(f +
-1) - 1$ or fewer failures. A \phatraidcf{$C$}{$f$} group is likely resilient
+1) - 1$ or fewer failures. In addition, a \phatraidcf{$C$}{$f$} group is likely resilient
 to $2(f+1)$ failures and unlikely resistant to $(C-1)\cdot f + 2f + 1$ failures.
 
 For exactly $2(f+1)$ node failures, the probability of a \phatraidcf{$C$}{$f$}
@@ -686,7 +721,7 @@ group failure is:
        {\binom{C \cdot (2f+1)}{2(f+1)}}
 \end{align*}
 
-For \phatraidcf{6}{1} we calculate:
+For example, for a \phatraidcf{6}{1} we calculate:
 
 \begin{align*}
   P\left[\textrm{group failure} \,|\, \phatraidcf{6}{1},\, n_{failure}=4\right]
@@ -705,7 +740,7 @@ We evaluated a prototype \phatraidcf{$C$}{$f$} implementation. We simulated disk
 latency with sleeps. All experiments are run on a 2013-model MacBook Pro with
 8GB of RAM, and a 3GHz Intel Core i7. We found that latency scales as
 $\frac{1}{C-1}$. This is the expected behavior for breaking a file into $C-1$
-chunks. We always use one bit of parity.
+chunks. We always use one bit of party.
 
 Figure \ref{fig:plot} is a scatter plot of the time to store a 100 MB file in a
 \phatraid{} group. Each point represents a different configuration. The x-axis
@@ -736,7 +771,7 @@ network latency, communications overhead) to become more important.
 \section{Conclusion}
 
 We've presented RAID on a distributed file system which shows that sharding
-files improves latency for large files while maintaining reasonable failure
+files can improve latency for large files while maintaining reasonable failure
 probabilities.
 
 \bibliographystyle{plain}
